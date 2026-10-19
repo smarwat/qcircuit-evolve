@@ -128,15 +128,25 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 `--budget-usd` is rejected for any backend but `api`.
 
-**claude-code call shape** (flags checked against `claude --help`, Claude Code 2.1.157):
+**claude-code call shape** (flags checked against `claude --help`, Claude Code 2.1.295):
 
 ```
-claude -p --output-format json --model claude-opus-5-5 --effort high --tools "" \
-       --max-turns 1 --no-session-persistence --system-prompt "<rules + task spec>"   < user prompt on stdin
+claude -p --output-format json --model claude-opus-5-5 --effort high --tools "" --max-turns 1 \
+       --restricted --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands \
+       --no-session-persistence --system-prompt "<rules + task spec>"      < user prompt on stdin
 ```
 
-* `--tools ""` disables every tool, so the model can only answer in text. `--max-turns` is accepted
-  by the CLI but not listed in `--help`; it is a backstop.
+* **Needs Claude Code ≥ 2.1.280.** Older CLIs reject `claude-opus-5-5` with a 400, and they lack
+  `--restricted`. At startup the client reads `claude --help` and refuses to run if any required
+  flag is missing. Update with `claude update`, or point `--claude-bin` at a newer binary (e.g. the
+  one bundled with the Claude desktop app).
+* **Isolation:** `--tools ""` alone only removes built-in tools. MCP servers (including claude.ai
+  connectors), plugins, hooks and skills still load, and in testing the model could list the
+  user's Supabase and Docs connector tools. `--restricted` (ignores user/project/local settings),
+  `--strict-mcp-config` with an empty `--mcp-config`, and `--disable-slash-commands` remove them.
+  The model then reports no tools, and the context drops from ~147K to ~9K tokens.
+  `--max-turns` is accepted but not listed in `--help`; it is a backstop. Calls with
+  `num_turns > 1` or `permission_denials` print a warning.
 * Each call runs in a fresh, empty temp directory (deleted afterwards), so the model cannot see
   the repo or `config.py`.
 * The subprocess environment is an allowlist (`PATH`, `HOME`, `USER`, locale, `TMPDIR`, ...). No
@@ -206,7 +216,7 @@ Checked against anthropic-sdk-python 1.15.0 types and the platform.claude.com do
 
 ## Tests
 
-`.venv/bin/python -m pytest tests -q` runs 69 tests in about 70s. None of them call the real
+`.venv/bin/python -m pytest tests -q` runs 71 tests in about 70s. None of them call the real
 `claude` CLI or the API. They cover:
 - the claude-code backend against fake `claude` executables: success, usage limit (JSON and
   stderr), model mismatch, malformed output, auth error, the environment/cwd/argv check,

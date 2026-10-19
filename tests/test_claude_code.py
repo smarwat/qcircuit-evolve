@@ -39,13 +39,25 @@ def error_json(msg, status):
             "total_cost_usd": 0, "usage": {"input_tokens": 0, "output_tokens": 0}, "modelUsage": {}}
 
 
-def make_fake(tmp_path, stdout="", stderr="", code=0, record=None, name="claude"):
-    """Write an executable fake `claude` that prints fixed output and optionally records
-    its argv, cwd, environment, stdin and the cwd listing to a JSON file."""
+FAKE_HELP_FLAGS = ["--output-format", "--model", "--effort", "--tools", "--no-session-persistence",
+                   "--system-prompt", "--restricted", "--strict-mcp-config", "--mcp-config",
+                   "--disable-slash-commands"]
+
+
+def make_fake(tmp_path, stdout="", stderr="", code=0, record=None, name="claude", help_flags=None):
+    """Write an executable fake `claude` that answers --help/--version, prints fixed output
+    and optionally records its argv, cwd, environment, stdin and cwd listing to a JSON file."""
     path = tmp_path / name
+    help_text = "\n".join(f"  {f} <x>   description" for f in (help_flags or FAKE_HELP_FLAGS))
     path.write_text(textwrap.dedent(f"""\
         #!/usr/bin/env python3
         import json, os, sys
+        if "--help" in sys.argv:
+            print({help_text!r})
+            sys.exit(0)
+        if "--version" in sys.argv:
+            print("9.9.9 (fake Claude Code)")
+            sys.exit(0)
         data = sys.stdin.read()
         rec = {str(record) if record else None!r}
         if rec:
@@ -126,6 +138,14 @@ def test_auth_error_is_fatal(tmp_path):
     assert isinstance(ei.value, FatalAPIError)
 
 
+def test_cli_too_old_for_model_is_fatal(tmp_path):
+    msg = ("API Error: 400 Claude Code 2.1.157 does not support this model; version 2.1.280 or newer "
+           "is required. Run 'claude update', or update the Claude desktop app, then try again.")
+    c = client_for(make_fake(tmp_path, json.dumps(error_json(msg, 400)), code=1))
+    with pytest.raises(FatalAPIError, match="cannot use model"):
+        c.call("prompt")
+
+
 def test_environment_is_stripped_and_cwd_is_empty(tmp_path, monkeypatch):
     for k, v in {"ANTHROPIC_API_KEY": "sk-ant-secret", "ANTHROPIC_AUTH_TOKEN": "tok",
                  "ANTHROPIC_BASE_URL": "http://localhost:1", "CLAUDE_CODE_SIMPLE": "1", "CLAUDECODE": "1",
@@ -151,6 +171,20 @@ def test_environment_is_stripped_and_cwd_is_empty(tmp_path, monkeypatch):
     assert argv[argv.index("--effort") + 1] == "high"
     assert argv[argv.index("--system-prompt") + 1] == "SYSTEM PROMPT"
     assert "--no-session-persistence" in argv
+    # --tools "" alone leaves MCP servers, plugins and skills loaded; these remove them.
+    assert {"--restricted", "--strict-mcp-config", "--disable-slash-commands"} <= set(argv)
+    assert json.loads(argv[argv.index("--mcp-config") + 1]) == {"mcpServers": {}}
+
+
+def test_cli_without_isolation_flags_is_refused(tmp_path):
+    old = make_fake(tmp_path, json.dumps(success_json()),
+                    help_flags=[f for f in FAKE_HELP_FLAGS if f != "--restricted"])
+    with pytest.raises(FatalAPIError, match="--restricted"):
+        client_for(old).check_cli()
+    assert client_for(make_fake(tmp_path, json.dumps(success_json()), name="new")).check_cli().startswith("9.9.9")
+    p = run_orch("--claude-bin", old, "--generations", "1", "--out", str(tmp_path / "o"))
+    assert p.returncode != 0 and "lacks ['--restricted']" in (p.stdout + p.stderr)
+    assert not (tmp_path / "o" / "attempts.jsonl").exists()  # refused before any call
 
 
 def test_clean_env_is_an_allowlist():

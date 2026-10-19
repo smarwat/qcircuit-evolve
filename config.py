@@ -91,15 +91,16 @@ LLM = {
 }
 
 # Default backend: the user's Claude Code subscription via headless `claude -p`.
-# Flags checked against `claude --help` (Claude Code 2.1.157) on 2026-10-19;
-# --max-turns is accepted by the CLI but not listed in --help.
+# Flags checked against `claude --help` (Claude Code 2.1.157 and 2.1.295) on 2026-10-19;
+# --max-turns is accepted by the CLI but not listed in --help. claude-opus-5-5 needs
+# Claude Code >= 2.1.280, and the isolation flags (--restricted etc.) need a recent CLI.
 CLAUDE_CODE = {
     "binary": "claude",
     "model": "claude-opus-5-5",
     "expected_model": "claude-opus-5-5",   # warn loudly if another model answers
     "effort": "high",                       # --effort low|medium|high|xhigh|max
     "max_turns": 1,
-    "timeout_s": 1800,                      # per call
+    "timeout_s": 3600,                      # per call (a redesign call took 18.5 min)
     "per_gen": 1,                           # default candidates per generation for this backend
     "max_retries": 3,                       # transient CLI/API errors (5xx, overloaded)
     "retry_base_delay": 15.0,

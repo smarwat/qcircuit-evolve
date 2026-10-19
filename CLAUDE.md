@@ -52,7 +52,10 @@ add code paths that fall back to it, unless the user asks. Tests must never invo
   (tests check this).
 - Keep `--mock` working without network access or the `anthropic` package.
 - The `claude -p` subprocess must keep running in an empty temp dir with the allowlisted
-  environment (no ANTHROPIC_* / CLAUDE_CODE_* variables) and `--tools ""`.
+  environment (no ANTHROPIC_* / CLAUDE_CODE_* variables), `--tools ""` AND the isolation flags
+  (`--restricted --strict-mcp-config --mcp-config '{"mcpServers":{}}' --disable-slash-commands`).
+  `--tools ""` alone still exposes the user's MCP connectors. Requires Claude Code >= 2.1.280
+  (the user's PATH `claude` may be older; the desktop app bundles a newer one).
 - Do not change effort/thinking mid-run: it invalidates the prompt cache.
 - Pricing lives in `config.LLM["prices_per_mtok"]`. Re-check it against the pricing page when the
   model changes.

@@ -266,9 +266,13 @@ class Run:
         elif a.backend == "claude-code":
             self.client = ClaudeCodeClient(cfg["claude_code"], build_system_prompt(cfg))
             info = self.client.model_info()
-            print(f"[backend] claude-code: {info}")
             if not info["binary"]:
                 raise SystemExit(f"`{cfg['claude_code']['binary']}` not found on PATH")
+            try:
+                info["version"] = self.client.check_cli()
+            except FatalAPIError as e:
+                raise SystemExit(str(e)) from None
+            print(f"[backend] claude-code: {info}")
         elif a.backend == "api":  # only ever reached with an explicit --backend api
             self.client = ClaudeClient(cfg["llm"], build_system_rules(cfg), build_task_spec(cfg))
             info = self.client.model_info()
@@ -430,7 +434,8 @@ class Run:
                 if self.args.backend == "claude-code":
                     rec.update(cost_billed=False, notional_cost_usd=res.get("notional_cost_usd"),
                                models_used=res.get("models_used"), model_mismatch=res.get("model_mismatch"),
-                               num_turns=res.get("num_turns"), duration_ms=res.get("duration_ms"),
+                               num_turns=res.get("num_turns"), permission_denials=res.get("permission_denials"),
+                               context_tokens=res.get("context_tokens"), duration_ms=res.get("duration_ms"),
                                duration_api_ms=res.get("duration_api_ms"))
                 with open(os.path.join(self.out, "replies", f"{job['id']}.md"), "w") as f:
                     f.write(res["text"])

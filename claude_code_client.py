@@ -51,6 +51,8 @@ _LIMIT_RE = re.compile(r"usage limit|limit reached|hit your limit|limit will res
                        r"too many requests|out of (?:extra )?usage|quota", re.I)
 _AUTH_RE = re.compile(r"failed to authenticate|not logged in|please run /login|invalid api key|"
                       r"oauth (?:access )?token|authentication", re.I)
+_UNSUPPORTED_RE = re.compile(r"does not support this model|or newer is required|unrecognized.?model|"
+                             r"model.{0,40}not (?:found|available|supported)|invalid model", re.I)
 _TRANSIENT_RE = re.compile(r"overloaded|internal server error|api_error|\b5\d\d\b|timed? ?out|"
                            r"connection (?:error|reset|refused)|ECONNRESET|socket hang up", re.I)
 
@@ -130,11 +132,39 @@ class ClaudeCodeClient:
         self.system_prompt = system_prompt
         self.warn = warn or (lambda msg: print(msg, file=sys.stderr, flush=True))
 
+    # `--tools ""` only removes built-in tools. MCP servers (including claude.ai connectors),
+    # plugins, hooks and skills still load unless these are passed too: --restricted ignores
+    # user/project/local settings, --strict-mcp-config with an empty --mcp-config loads no
+    # MCP servers, --disable-slash-commands drops skills. Measured: without them the model
+    # saw the user's connector tools (~13K-147K context tokens); with them, none (~600).
+    ISOLATION = ["--restricted", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+                 "--disable-slash-commands"]
+    REQUIRED_FLAGS = ["--output-format", "--model", "--effort", "--tools", "--no-session-persistence",
+                      "--system-prompt", "--restricted", "--strict-mcp-config", "--mcp-config",
+                      "--disable-slash-commands"]  # --max-turns works but is not listed in --help
+
     def command(self):
         c = self.cfg
         return [c["binary"], "-p", "--output-format", "json", "--model", c["model"],
                 "--effort", c["effort"], "--tools", "", "--max-turns", str(c["max_turns"]),
-                "--no-session-persistence", "--system-prompt", self.system_prompt]
+                *self.ISOLATION, "--no-session-persistence", "--system-prompt", self.system_prompt]
+
+    def check_cli(self):
+        """Fail fast unless the CLI supports every flag the isolated call needs."""
+        try:
+            proc = subprocess.run([self.cfg["binary"], "--help"], capture_output=True, text=True, timeout=60,
+                                  env=clean_env(self.cfg["env_allowlist"]), cwd=tempfile.gettempdir())
+            ver = subprocess.run([self.cfg["binary"], "--version"], capture_output=True, text=True, timeout=60,
+                                 env=clean_env(self.cfg["env_allowlist"]), cwd=tempfile.gettempdir())
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise FatalAPIError(f"cannot run `{self.cfg['binary']}`: {e}") from None
+        missing = [f for f in self.REQUIRED_FLAGS if not re.search(re.escape(f) + r"\b", proc.stdout)]
+        version = (ver.stdout or "").strip()
+        if missing:
+            raise FatalAPIError(f"`{self.cfg['binary']}` ({version or 'unknown version'}) lacks {missing}, "
+                                "needed to run the model with no tools, MCP servers, plugins or skills. "
+                                "Update it (`claude update`) or pass --claude-bin pointing at a newer CLI.")
+        return version
 
     def model_info(self):
         return {"backend": "claude-code", "binary": shutil.which(self.cfg["binary"]),
@@ -162,6 +192,8 @@ class ClaudeCodeClient:
             return "limit"
         if status in (401, 403) or _AUTH_RE.search(text or ""):
             return "auth"
+        if _UNSUPPORTED_RE.search(text or ""):
+            return "unsupported"
         if (status is not None and status >= 500) or _TRANSIENT_RE.search(text or ""):
             return "transient"
         return "other"
@@ -200,6 +232,9 @@ class ClaudeCodeClient:
                 if kind == "auth":
                     raise CLIAuthError(f"claude CLI authentication failed ({status}): {msg[:300]}. "
                                        "Run `claude auth login` in a terminal, then --resume.")
+                if kind == "unsupported":
+                    raise FatalAPIError(f"the claude CLI cannot use model {c['model']!r}: {msg[:300]} "
+                                        "(update the CLI, or point --claude-bin at a newer one, then --resume)")
                 if kind == "transient" and attempt < c["max_retries"]:
                     time.sleep(min(c["retry_max_delay"], c["retry_base_delay"] * 2 ** attempt))
                     continue
@@ -212,6 +247,10 @@ class ClaudeCodeClient:
                 self.warn("!" * 72 + f"\nWARNING: expected {expected} but the CLI reported "
                           f"{main or 'no model'} (all models: {models}).\n" + "!" * 72)
             usage = usage_to_dict(data.get("usage") or {})
+            denials = data.get("permission_denials") or []
+            if (data.get("num_turns") or 1) > c["max_turns"] or denials:
+                self.warn(f"WARNING: claude -p reported num_turns={data.get('num_turns')} "
+                          f"permission_denials={denials}: the model tried to act, not just answer.")
             return {
                 "text": text,
                 "thinking_summary": "",
@@ -226,6 +265,8 @@ class ClaudeCodeClient:
                 "models_used": models,
                 "model_mismatch": mismatch,
                 "num_turns": data.get("num_turns"),
+                "permission_denials": denials,
+                "context_tokens": usage["input"] + usage["cache_read"] + usage["cache_write"],
                 "duration_ms": data.get("duration_ms"),
                 "duration_api_ms": data.get("duration_api_ms"),
             }
