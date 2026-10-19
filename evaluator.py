@@ -9,7 +9,11 @@ For each width (cheapest first, stop at the first failure):
      ancillas clean.
 Score = T*Q at the score width (n=32), lower is better.
 
-Usage: python evaluator.py path/to/candidate.py
+A separate verify tier (`verify()`, run by the orchestrator only on would-be new
+bests) re-checks n=32 on 20,000 fresh + adversarial inputs and runs the same
+generator at hidden widths/primes. Its feedback is only "failed verification".
+
+Usage: python evaluator.py path/to/candidate.py [--verify]
 """
 
 import json
@@ -21,6 +25,7 @@ import sys
 import time
 from array import array
 
+from adversarial import adversarial_inputs, is_prime
 from config import ancilla_budget, load_config
 from sandbox import SourceRejected, check_source
 
@@ -200,8 +205,13 @@ def _unslice(state, qubits, k):
 
 
 def check_width(gates, cfg, width, num_qubits):
-    n, p = width["n"], width["p"]
     xs, n_public = inputs_for_width(cfg, width)
+    return check_inputs(gates, width["n"], width["p"], xs, n_public, num_qubits)
+
+
+def check_inputs(gates, n, p, xs, n_public, num_qubits):
+    """Simulate all of xs at once. Inputs [0, n_public) are reported in detail;
+    failures beyond that only say 'failed hidden tests'."""
     K = len(xs)
     mask = (1 << K) - 1
     a_bits = _slice(xs, n)
@@ -299,6 +309,63 @@ def evaluate(source, cfg=None):
     return result
 
 
+# --------------------------------------------------------------------------
+# Verify tier (only for candidates that would become the new best)
+# --------------------------------------------------------------------------
+VERIFY_FAILED = "failed verification"
+
+
+def verify_targets(cfg):
+    """[(n, p, inputs)] for the verify tier. Never shown to the model."""
+    v = cfg["verify"]
+    sw = next(w for w in cfg["widths"] if w["n"] == cfg["score_width"])
+    targets = [(sw["n"], sw["p"], v["random_score_width"])]
+    targets += [(w["n"], w["p"], v["random_extra"]) for w in v["extra_widths"]]
+    out = []
+    for n, p, count in targets:
+        if not (is_prime(p) and p % 2 == 1 and p < (1 << n)):
+            raise ValueError(f"verify config: {p} is not an odd prime below 2^{n}")
+        xs = edge_inputs(n, p)
+        xs += list(adversarial_inputs(n, p, v["seed"], v["adversarial_per_metric"]))
+        xs += random_inputs(v["seed"], n, p, count)
+        out.append((n, p, xs))
+    return out
+
+
+def verify(source, cfg=None, expected=None):
+    """Harder, hidden checks. `expected` = {"T": .., "Q": ..} at the score width
+    from the normal evaluation; the verified circuit must be the scored one.
+
+    Returns {"passed", "feedback", "private", "elapsed"}. Only `feedback` may be
+    shown to the model, and it never names inputs or widths. `private` is for
+    the human-readable run log."""
+    cfg = cfg or load_config()
+    t0 = time.monotonic()
+    deadline = t0 + cfg["eval_timeout"]
+    checked = []
+    try:
+        check_source(source)
+        for n, p, xs in verify_targets(cfg):
+            num_qubits = 2 * n + ancilla_budget(cfg, n)
+            gates = generate_gates(source, n, p, cfg, deadline - time.monotonic())
+            T, Q, _ = validate(gates, num_qubits, n, cfg["gate_cap"])
+            if expected and n == cfg["score_width"] and p == next(
+                    w["p"] for w in cfg["widths"] if w["n"] == n):
+                if (T, Q) != (expected["T"], expected["Q"]):
+                    raise CandidateFailure(f"circuit at n={n} differs from the scored one: "
+                                           f"T,Q = {T},{Q} vs {expected['T']},{expected['Q']}", "mismatch")
+            check_inputs(gates, n, p, xs, len(xs), num_qubits)
+            if time.monotonic() > deadline:
+                raise CandidateFailure(f"verification exceeded {cfg['eval_timeout']:g}s", "timeout")
+            checked.append({"n": n, "p": p, "inputs": len(xs), "T": T, "Q": Q})
+    except (CandidateFailure, SourceRejected) as e:
+        return {"passed": False, "feedback": VERIFY_FAILED,
+                "private": {"detail": str(e), "kind": getattr(e, "kind", "rejected"), "checked": checked},
+                "elapsed": round(time.monotonic() - t0, 3)}
+    return {"passed": True, "feedback": "passed verification", "private": {"checked": checked},
+            "elapsed": round(time.monotonic() - t0, 3)}
+
+
 def format_feedback(r, cfg):
     lines = []
     if r["valid"]:
@@ -328,13 +395,21 @@ def format_feedback(r, cfg):
 
 
 def main(argv):
-    if len(argv) != 2:
+    args = [a for a in argv[1:] if not a.startswith("--")]
+    if len(args) != 1:
         print(__doc__)
         return 2
-    with open(argv[1]) as f:
+    with open(args[0]) as f:
         src = f.read()
     r = evaluate(src)
     print(r["feedback"])
+    if r["valid"] and "--verify" in argv:
+        w = next(w for w in r["widths"] if w["n"] == load_config()["score_width"])
+        v = verify(src, expected={"T": w["T"], "Q": w["Q"]})
+        print(f"Verify: {v['feedback']} ({v['elapsed']:.1f}s)")
+        if not v["passed"]:
+            print(f"  [private] {v['private']['detail']}")
+        return 0 if v["passed"] else 1
     return 0 if r["valid"] else 1
 
 

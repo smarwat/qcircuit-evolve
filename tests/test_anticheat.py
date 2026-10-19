@@ -189,12 +189,14 @@ def test_hidden_failures_do_not_leak_inputs():
         if w["mode"] == "sampled":
             xs, k = inputs_for_width(cfg, w)
             public[w["n"]], hidden[w["n"]] = xs[:k], xs[k:]
+    assert list(public) == [32]
     src = (f"PUBLIC = {public!r}\n"
-           "def TABLE_INPUTS(n, p):\n    return range(1, p) if n <= 8 else PUBLIC[n]\n" + TABLE)
+           "def TABLE_INPUTS(n, p):\n    return PUBLIC[n] if n in PUBLIC else range(1, p)\n" + TABLE)
     r = evaluate(src, cfg)
     assert not r["valid"] and r["failure_kind"] == "hidden"
-    assert r["failure"] == "failed hidden tests at n=16"
+    # n=16 is exhaustive (the table covers every input there); n=32 is sampled.
+    assert r["failure"] == "failed hidden tests at n=32"
     text = r["feedback"] + "\n" + r["failure"]
-    leaked = [x for x in set(hidden[16]) - set(public[16]) if re.search(rf"(?<![\d,]){x}(?![\d,])", text)]
+    leaked = [x for x in set(hidden[32]) - set(public[32]) if re.search(rf"(?<![\d,]){x}(?![\d,])", text)]
     assert leaked == []
     assert "input a=" not in text

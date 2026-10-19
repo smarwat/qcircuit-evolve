@@ -1,2 +1,2 @@
 pytest>=8
-anthropic>=0.40   # only for real (non --mock) orchestrator runs
+anthropic>=1.15   # only for real (non --mock) orchestrator runs
