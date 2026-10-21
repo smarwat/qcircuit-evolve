@@ -8,6 +8,11 @@ Toffoli) for computing a⁻¹ mod p, and a strict, sandboxed evaluator scores th
 T·Q (Toffoli count × qubits). A hidden verify tier and an independent Qiskit/Aer cross-check
 guard against circuits that only look correct.
 
+By [Yusuf Marwat](https://github.com/smarwat). Inspired by Anthropic's
+[*Designing more efficient quantum circuits with Claude*](https://www.anthropic.com/research/designing-efficient-quantum-circuits)
+(October 2026). This project is an independent, small-scale exploration, not affiliated with or a
+replication of that work.
+
 [![ci](https://github.com/smarwat/qcircuit-evolve/actions/workflows/ci.yml/badge.svg)](https://github.com/smarwat/qcircuit-evolve/actions/workflows/ci.yml)
 
 ## Why it matters
@@ -178,8 +183,9 @@ See the computed comparison table and every accounting difference in
   fault-tolerant compilation (no Clifford+T synthesis, layout or error-correction overhead).
 - **Few calls.** A small number of model calls (17) and a single run, so this is not a
   statistical study of the method.
-- **Not a replication.** This is not a replication of Anthropic's study; it is an independent
-  small experiment inspired by it.
+- **Not a replication.** This is an independent, small-scale exploration inspired by Anthropic's
+  [*Designing more efficient quantum circuits with Claude*](https://www.anthropic.com/research/designing-efficient-quantum-circuits),
+  not affiliated with or a replication of that work.
 
 ## Future work
 
@@ -239,10 +245,11 @@ layout and data flow.
 
 - [OpenEvolve](https://github.com/codelion/openevolve), whose evolutionary-coding loop and
   SEARCH/REPLACE diff format this follows.
-- Anthropic's research on using Claude for discovery, which inspired the experiment. This is not
-  a replication.
+- Anthropic, [*Designing more efficient quantum circuits with Claude*](https://www.anthropic.com/research/designing-efficient-quantum-circuits)
+  (October 2026), which inspired the experiment. This project is an independent, small-scale
+  exploration, not affiliated with or a replication of that work.
 - The reversible-inversion designs compared against:
   - Roetteler, Naehrig, Svore & Lauter 2017 (arXiv:1706.06752)
   - Häner, Jaques, Naehrig, Roetteler & Soeken 2020 (arXiv:2001.09580)
 
-MIT licensed. See [LICENSE](LICENSE).
+MIT licensed, © 2026 Yusuf Marwat. See [LICENSE](LICENSE).
