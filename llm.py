@@ -168,7 +168,8 @@ class MockClient:
              "full_redesign", "full_same", "diff_ok"]
     LOOP = "    for it in range(2 * n):\n"
 
-    def __init__(self, llm_cfg, redesign_source=None):
+    def __init__(self, llm_cfg, redesign_source=None, hidden_width=None):
+        self.hidden_width = hidden_width  # a verify-tier width, for the hidden-cheat edit
         self.cfg = llm_cfg
         self.calls = 0
         self.redesign_source = redesign_source
@@ -188,8 +189,9 @@ class MockClient:
             text = ("Mock: run 2n-1 iterations.\n<<<<<<< SEARCH\n" + self.LOOP
                     + "=======\n    for it in range(2 * n - 1):\n>>>>>>> REPLACE\n")
         elif k == "diff_hidden_cheat":
+            h = self.hidden_width if self.hidden_width is not None else -1  # -1: cheat never triggers
             text = ("Mock: fewer iterations, wrong only at a hidden width.\n<<<<<<< SEARCH\n" + self.LOOP
-                    + "=======\n    for it in range(2 * n - 1 if n != -1 else 2 * n - 4):\n>>>>>>> REPLACE\n")
+                    + f"=======\n    for it in range(2 * n - 1 if n != {h} else 2 * n - 4):\n>>>>>>> REPLACE\n")
         elif k == "full_same":
             text = f"Mock: resubmit the parent.\n```python\n# mock {self.calls}\n{parent}```\n"
         elif k == "diff_ok":  # correct but wasteful: a cancelling Toffoli pair

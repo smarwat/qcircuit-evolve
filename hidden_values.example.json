@@ -1,0 +1,10 @@
+{
+ "_comment": "PUBLIC EXAMPLE values, not secret. Copy to hidden_values.json (git-ignored) and replace every value, or run `python make_hidden_values.py`. Used automatically, with a warning, when no hidden_values.json exists (tests, CI). Primes are checked in code (config.check_hidden).",
+ "hidden_seed": 1111111,
+ "verify_seed": 2222222,
+ "verify_extra_widths": [
+  {"n": 12, "p": 4093},
+  {"n": 20, "p": 1048573},
+  {"n": 32, "p": 4294967279}
+ ]
+}

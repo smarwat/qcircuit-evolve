@@ -6,7 +6,9 @@ override fields without touching the module-level defaults.
 """
 
 import copy
+import json
 import os
+import sys
 
 TASK = {
     "name": "modinv",
@@ -34,28 +36,61 @@ TASK = {
     "random_samples": 256,
     "public_seed": 20240613,
     "hidden_samples": 256,
-    # Hidden seed: never shown to the model. Override with QCE_HIDDEN_SEED.
-    "hidden_seed": 0,  # redacted: rotated secret (published earlier, now burned)
+    # hidden_seed is loaded from the hidden-values file (see load_hidden()).
     # Memory limit for the candidate subprocess (bytes). Only enforced where
     # the OS supports RLIMIT_AS (Linux); ignored on macOS.
     "child_memory_limit": 4 * 1024**3,
     # Verify tier: run only on candidates that would become the new best.
     # Never shown to the model (not in the system prompt, not in feedback).
+    # Its seed and extra widths/primes are loaded from the hidden-values file.
     "verify": {
-        # Secret seed for verify's random inputs and adversarial search.
-        # Override with QCE_VERIFY_SEED.
-        "seed": 0,  # redacted: rotated secret (published earlier, now burned)
         "random_score_width": 20_000,   # fresh random inputs at the score width
         "random_extra": 2_000,          # per hidden extra width
         "adversarial_per_metric": 16,   # hardest inputs per step-count metric
-        # Hidden extra widths/primes; primality is checked in code (adversarial.is_prime).
-        "extra_widths": [
-            {"n": 0, "p": 0},  # redacted: rotated secret (published earlier, now burned)
-            {"n": 0, "p": 0},  # redacted: rotated secret (published earlier, now burned)
-            {"n": 0, "p": 0},  # redacted: rotated secret (published earlier, now burned)
-        ],
     },
 }
+
+# ---------------------------------------------------------------------------
+# Hidden values (secret test seeds and verify widths/primes)
+# ---------------------------------------------------------------------------
+# The real values live in an UNTRACKED file, hidden_values.json in the repo root (or the
+# path in QCE_HIDDEN_FILE); individual seeds can also be overridden with QCE_HIDDEN_SEED /
+# QCE_VERIFY_SEED. hidden_values.example.json (committed) documents the format with PUBLIC
+# example values; it is used, with a warning, when no real file exists (e.g. in CI), so
+# everything still runs, but nothing is hidden in that case.
+HERE = os.path.dirname(os.path.abspath(__file__))
+HIDDEN_FILE = os.path.join(HERE, "hidden_values.json")
+HIDDEN_EXAMPLE = os.path.join(HERE, "hidden_values.example.json")
+_warned = []
+
+
+def load_hidden():
+    """Return (values, source) where source is 'file', 'env-file' or 'example'."""
+    path = os.environ.get("QCE_HIDDEN_FILE")
+    source = "env-file" if path else "file"
+    path = path or HIDDEN_FILE
+    if not os.path.exists(path):
+        path, source = HIDDEN_EXAMPLE, "example"
+        if not _warned:
+            _warned.append(1)
+            print("[config] WARNING: no hidden_values.json; using the PUBLIC example hidden values "
+                  "(fine for tests and CI, not for real runs)", file=sys.stderr)
+    with open(path) as f:
+        values = json.load(f)
+    check_hidden(values, path)
+    return values, source
+
+
+def check_hidden(values, where="hidden values"):
+    from adversarial import is_prime  # local import: adversarial does not import config
+
+    for key in ("hidden_seed", "verify_seed", "verify_extra_widths"):
+        if key not in values:
+            raise ValueError(f"{where}: missing {key!r}")
+    for w in values["verify_extra_widths"]:
+        n, p = int(w["n"]), int(w["p"])
+        if not (p % 2 == 1 and p < (1 << n) and is_prime(p)):
+            raise ValueError(f"{where}: verify width n={n}: {p} is not an odd prime below 2^{n}")
 
 
 LLM = {
@@ -127,6 +162,11 @@ def load_config(**overrides):
     cfg["llm"] = copy.deepcopy(LLM)
     cfg["claude_code"] = copy.deepcopy(CLAUDE_CODE)
     cfg["evolution"] = copy.deepcopy(EVOLUTION)
+    hidden, source = load_hidden()
+    cfg["hidden_seed"] = int(hidden["hidden_seed"])
+    cfg["verify"]["seed"] = int(hidden["verify_seed"])
+    cfg["verify"]["extra_widths"] = [{"n": int(w["n"]), "p": int(w["p"])} for w in hidden["verify_extra_widths"]]
+    cfg["hidden_source"] = source
     env_seed = os.environ.get("QCE_HIDDEN_SEED")
     if env_seed:
         cfg["hidden_seed"] = int(env_seed)

@@ -17,6 +17,12 @@ def read_seed(name):
         return f.read()
 
 
+def hidden_width():
+    cfg = load_config()
+    public = {w["n"] for w in cfg["widths"]}
+    return next(w["n"] for w in cfg["verify"]["extra_widths"] if w["n"] not in public)
+
+
 def expected_at_32(result):
     w = next(w for w in result["widths"] if w["n"] == 32)
     return {"T": w["T"], "Q": w["Q"]}
@@ -55,17 +61,18 @@ def test_fewer_iterations_only_at_32_passes_normal_but_fails_verify():
 
 
 def test_verify_feedback_reveals_nothing():
-    # Correct at the public widths, wrong only at the hidden width.
+    # Correct at the public widths, wrong only at a hidden verify width.
+    hn = hidden_width()
     src = read_seed("binary_euclid").replace(
         "    c.append_inverse(start, end)\n",
-        "    c.append_inverse(start, end)\n    if n == -1:\n        c.x(c.anc[-1])\n")
+        f"    c.append_inverse(start, end)\n    if n == {hn}:\n        c.x(c.anc[-1])\n")
     r = evaluate(src)
     assert r["valid"]
     v = verify(src, expected=expected_at_32(r))
     assert not v["passed"]
     assert v["feedback"] == "failed verification"
     assert not re.search(r"\d", v["feedback"])
-    assert "n=" in v["private"]["detail"]
+    assert f"n={hn}" in v["private"]["detail"]
 
 
 def test_verify_rejects_a_different_circuit_than_the_scored_one(seed_src, seed_result):
@@ -89,14 +96,17 @@ def test_hidden_primes_are_prime_and_never_shown():
 
 def test_adversarial_search_is_deterministic_and_hard():
     p = 4294967291
-    seed = load_config()["verify"]["seed"]
-    a = adversarial_inputs(32, p, seed)
-    assert a == adversarial_inputs.__wrapped__(32, p, seed)
-    assert all(1 <= x < p for x in a)
-    # Includes the binary-Euclid worst case region and beats random sampling for divsteps.
+    # Fixed public seeds: this tests the search mechanism, not the secret verify seed.
+    found = []
+    for seed in (1, 7, 11):
+        a = adversarial_inputs(32, p, seed)
+        assert a == adversarial_inputs.__wrapped__(32, p, seed)  # deterministic
+        assert all(1 <= x < p for x in a)
+        found += a
+    # Across seeds, the search reaches divsteps step counts that random sampling does not.
     import random
     rng = random.Random(0)
     rand_max = max(steps_divsteps(rng.randrange(1, p), p) for _ in range(5000))
-    assert max(steps_divsteps(x, p) for x in a) > rand_max
+    assert max(steps_divsteps(x, p) for x in found) > rand_max
     assert set(METRICS) >= {"binary_euclid", "kaliski", "divsteps"}
     assert steps_binary_euclid(1 << 31, p) == 63

@@ -62,7 +62,9 @@ def test_mock_exercises_diff_and_verify_paths(mock_run):
     assert cheat and all(r["feedback"] == "failed verification" and not r["valid"] for r in cheat)
     assert any(r.get("verify") == "passed verification" for r in recs)
     private = (out / "private" / "verify.jsonl").read_text()
-    assert "n=" in private
+    cfg = load_config()
+    hidden_n = next(w["n"] for w in cfg["verify"]["extra_widths"] if w["n"] not in {x["n"] for x in cfg["widths"]})
+    assert f"n={hidden_n}" in private
     archive = json.loads((out / "archive.json").read_text())
     assert not any(e["id"] == cheat[0]["id"] for e in archive)
 
