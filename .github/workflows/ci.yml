@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install
+        run: pip install -r requirements.txt
+      # No hidden_values.json in CI: config falls back to the public example values.
+      - name: Tests (offline; the claude CLI and the API are never called)
+        run: python -m pytest tests -q
+      - name: Mock evolution run (2 generations, no network)
+        run: python orchestrator.py --mock --generations 2 --out "$RUNNER_TEMP/mock-run"
+# The Qiskit/Aer independent verification (analysis/independent_verify.py) is a manual
+# step: it needs requirements-verify.txt and takes about an hour. See README.

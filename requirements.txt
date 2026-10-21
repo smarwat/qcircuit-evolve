@@ -1,2 +1,3 @@
-pytest>=8
-anthropic>=1.15   # only for real (non --mock) orchestrator runs
+# Core: evaluator, orchestrator, tests. Tested with Python 3.14.7.
+pytest==9.1.1
+anthropic==1.15.0   # only needed for --backend api (and two offline tests of its request shape)
