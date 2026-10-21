@@ -32,15 +32,13 @@ Simulator self-test before the quantum checks: every Aer MPS primitive used was 
 |---|---|---|---|---|---|---|---|---|---|
 | 4 | H on all n input qubits | 0.750000000006 | 0.750000000000 | 23.000000000 | 23 | 0 | 0 | 0 | 0 s |
 | 4 | uniform over valid inputs 1..p−1 (compiled) | 1.000000000000 | 1.000000000000 | 23.000000000 | 23 | 0 | 0 | 0 | 0 s |
-| 8 | H on all n input qubits | **NOT COMPLETED** | | | | | | | |
+| 8 | H on all n input qubits | 0.976562500009 | 0.976562500000 | 43.000000000 | 43 | 0 | 0 | 0 | 3796 s |
 
 Reading the table: with Hadamards every input has weight 1/2ⁿ, including the don't-care inputs 0 and p..2ⁿ−1 whose outputs the task leaves unspecified, so the expected probability on correct (a, a⁻¹ mod p) pairs is (p−1)/2ⁿ; ⟨ΣZ⟩ covers every branch, don't-cares included. At n = 4 the valid-input superposition is also run (expected probability 1). At n = 8 only the Hadamard preparation is run; a second preparation would repeat an hour-long simulation.
 
 **Harness problems found and fixed during verification (disclosed in full).** The first n = 4 quantum run reported probability 0 on the correct pairs although every basis-state check passed. A reversible classical circuit is a permutation of basis states, so that combination is impossible for the circuit itself; the cause was in the harness. (1) With Qiskit Aer 0.18.0's `matrix_product_state` method, `save_amplitudes` returned zeros after long circuits and `initialize` produced wrong output distributions; a 14-qubit random reversible circuit compared against the exact statevector method reproduces both. (2) Our code read `save_probabilities_dict` with hex-string keys while this version returns integer keys. The verifier now prepares the valid-input state with compiled u/cx gates, avoids both primitives, reads either key type, and runs the self-test above before any quantum check. The first run's shots were already consistent with a correct circuit (every valid input gave its inverse, every ancilla read 0); nothing about the circuit changed.
 
 **Disagreements with `evaluator.py`:** none found.
-
-**Checks not completed:** n=8 quantum check (H on all n input qubits).
 
 **Re-verification with fresh hidden values.** The original hidden seeds, widths and primes were committed to git earlier, so they were replaced with new secret values (kept in an untracked file) and the winner was re-checked by the project evaluator.
 Normal tier with new hidden inputs: **valid**, T·Q 7,847,844 (T = 34,572, Q = 227). Verify tier with a new seed, 2 new hidden widths and a new 32-bit prime (4 targets, 26,474 inputs, 20,122 at n = 32): **passed**. The new widths and primes are not disclosed.

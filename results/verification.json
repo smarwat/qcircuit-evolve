@@ -91,7 +91,44 @@
       "failures": 0,
       "first_failures": []
      },
-     "seconds": 24.9
+     "seconds": 24.9,
+     "quantum": [
+      {
+       "prep": "hadamard",
+       "io_mass_on_correct_valid_pairs": 0.9765625000088732,
+       "expected_mass": 0.9765625,
+       "ancillas": 43,
+       "ancilla_z_sum": 43.00000000017995,
+       "inputs_in_support": 256,
+       "inputs_with_more_than_one_output": 0,
+       "dont_care_outputs": {
+        "0": [
+         219
+        ],
+        "251": [
+         240
+        ],
+        "252": [
+         1
+        ],
+        "253": [
+         250
+        ],
+        "254": [
+         84
+        ],
+        "255": [
+         72
+        ]
+       },
+       "shots": 4096,
+       "shots_on_valid_inputs_with_wrong_output": 0,
+       "shots_on_valid_inputs_with_nonzero_ancilla": 0,
+       "shots_on_dont_care_inputs": 100,
+       "dont_care_shots_with_nonzero_ancilla": 0,
+       "sim_seconds": 3795.5
+      }
+     ]
     },
     {
      "n": 16,

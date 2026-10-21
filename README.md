@@ -123,7 +123,7 @@ exact on the last two steps.
      probability 1, every (input, output) pair is correct, and the registers are not entangled
      with the ancillas.
      - n = 4: passed, both with Hadamards and with a superposition over valid inputs only.
-     - n = 8: VERIFY_N8_STATUS.
+     - n = 8: passed with Hadamards. Probability exactly 0.9765625 (= 250/256) on correct pairs, ⟨ΣZ⟩ = 43 of 43 ancillas, 0 bad shots (63 min of simulation).
    - **Harness problems found along the way** (full disclosure in RESULTS.md): under the MPS
      method in Aer 0.18.0, `save_amplitudes` and `initialize` gave wrong results, which a small
      comparison against the exact statevector method reproduces. The verifier now avoids both

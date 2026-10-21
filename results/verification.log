@@ -7,3 +7,5 @@
 [selftest] Aer MPS vs statevector on a random 14-qubit reversible circuit: PASS {'hadamard': {'probabilities_match': True, 'expectation_matches': True}, 'valid_compiled': {'probabilities_match': True, 'expectation_matches': True}}
 [best] n=4 quantum (hadamard): io mass on correct pairs 0.750000000006 (expected 0.750000000000), <sum Z_anc> 23.000000000 of 23, bad shots 0/0, 0.4s
 [best] n=4 quantum (valid): io mass on correct pairs 1.000000000000 (expected 1.000000000000), <sum Z_anc> 23.000000000 of 23, bad shots 0/0, 0.3s
+[best] n=8 quantum (hadamard): io mass on correct pairs 0.976562500009 (expected 0.976562500000), <sum Z_anc> 43.000000000 of 43, bad shots 0/0, 3795.5s
+exit=0
