@@ -219,7 +219,9 @@ class Run:
             with open(os.path.join(self.out, "state.json")) as f:
                 self.state = json.load(f)
             cfg["llm"].update(self.state["llm"])         # keep model/effort stable across resume
-            cfg["claude_code"].update(self.state.get("claude_code", {}))
+            # The CLI path is per machine/session (app updates move bundled binaries): never restore it.
+            cfg["claude_code"].update({k: v for k, v in self.state.get("claude_code", {}).items()
+                                       if k != "binary"})
             cfg["evolution"].update(self.state["evolution"])
             self.state["sessions"] = self.state.get("sessions", 0) + 1
             self.archive = Archive.load(self.out)
@@ -241,6 +243,8 @@ class Run:
                 cfg["claude_code"]["effort"] = a.effort
         if a.per_gen:
             cfg["evolution"]["per_gen"] = a.per_gen
+        if a.redesign_prob is not None:
+            cfg["evolution"]["redesign_prob"] = a.redesign_prob
         if a.workers:
             cfg["evolution"]["workers"] = a.workers
         if a.eval_timeout:
@@ -262,7 +266,9 @@ class Run:
         if a.backend == "mock":
             divsteps = os.path.join(HERE, "seeds", "divsteps.py")
             redesign = open(divsteps).read() if os.path.exists(divsteps) else None
-            self.client = MockClient(cfg["llm"], redesign)
+            public = {w["n"] for w in cfg["widths"]}
+            hidden_n = next((w["n"] for w in cfg["verify"]["extra_widths"] if w["n"] not in public), None)
+            self.client = MockClient(cfg["llm"], redesign, hidden_width=hidden_n)
         elif a.backend == "claude-code":
             self.client = ClaudeCodeClient(cfg["claude_code"], build_system_prompt(cfg))
             info = self.client.model_info()
@@ -573,6 +579,8 @@ def main(argv=None):
     ap.add_argument("--per-gen", type=int, default=None,
                     help="candidates per generation (default 1 for claude-code, 4 otherwise)")
     ap.add_argument("--workers", type=int, default=None, help="parallel evaluation processes (config: 4)")
+    ap.add_argument("--redesign-prob", type=float, default=None,
+                    help="share of calls in redesign mode (config: 0.3)")
     ap.add_argument("--max-calls", type=int, default=None,
                     help="stop after this many model calls in total (cumulative across --resume)")
     ap.add_argument("--budget-usd", type=float, default=None,

@@ -3,3 +3,5 @@ runs/
 __pycache__/
 .pytest_cache/
 .claude/settings.local.json
+.venv-verify/
+hidden_values.json

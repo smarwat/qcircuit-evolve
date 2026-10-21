@@ -1,0 +1,9 @@
+# Separate environment for analysis/ (independent Qiskit verification, plots, report):
+#   python3 -m venv .venv-verify && .venv-verify/bin/pip install -r requirements-verify.txt
+# Tested with Python 3.14.7. Note: analysis/independent_verify.py self-tests the Aer MPS
+# primitives it uses against the statevector method before trusting them.
+qiskit==2.6.0
+qiskit-aer==0.18.0
+numpy==2.5.4
+matplotlib==3.11.2
+pypdf==6.21.1   # only to re-read the cited papers' text

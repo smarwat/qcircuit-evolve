@@ -1,0 +1,156 @@
+{
+ "meta": {
+  "qiskit": "2.6.0",
+  "qiskit_aer": "0.18.0",
+  "method": "matrix_product_state"
+ },
+ "reports": [
+  {
+   "name": "best",
+   "widths": [
+    {
+     "n": 4,
+     "p": 13,
+     "qasm": "qasm/best_n4.qasm.gz",
+     "qasm_bytes": 32127,
+     "qubits": 31,
+     "toffolis": 604,
+     "cnots": 1154,
+     "nots": 120,
+     "gates": 1878,
+     "toffoli_depth": 432,
+     "depth_all_gates": 903,
+     "basis": {
+      "inputs": 12,
+      "failures": 0,
+      "first_failures": []
+     },
+     "seconds": 0.3,
+     "quantum": [
+      {
+       "prep": "hadamard",
+       "io_mass_on_correct_valid_pairs": 0.7500000000059477,
+       "expected_mass": 0.75,
+       "ancillas": 23,
+       "ancilla_z_sum": 23.00000000000777,
+       "inputs_in_support": 16,
+       "inputs_with_more_than_one_output": 0,
+       "dont_care_outputs": {
+        "0": [
+         4
+        ],
+        "13": [
+         8
+        ],
+        "14": [
+         1
+        ],
+        "15": [
+         1
+        ]
+       },
+       "shots": 4096,
+       "shots_on_valid_inputs_with_wrong_output": 0,
+       "shots_on_valid_inputs_with_nonzero_ancilla": 0,
+       "shots_on_dont_care_inputs": 1033,
+       "dont_care_shots_with_nonzero_ancilla": 0,
+       "sim_seconds": 0.4
+      },
+      {
+       "prep": "valid",
+       "io_mass_on_correct_valid_pairs": 1.000000000000002,
+       "expected_mass": 1.0,
+       "ancillas": 23,
+       "ancilla_z_sum": 23.000000000000103,
+       "inputs_in_support": 12,
+       "inputs_with_more_than_one_output": 0,
+       "dont_care_outputs": {},
+       "shots": 4096,
+       "shots_on_valid_inputs_with_wrong_output": 0,
+       "shots_on_valid_inputs_with_nonzero_ancilla": 0,
+       "shots_on_dont_care_inputs": 0,
+       "dont_care_shots_with_nonzero_ancilla": 0,
+       "sim_seconds": 0.3
+      }
+     ]
+    },
+    {
+     "n": 8,
+     "p": 251,
+     "qasm": "qasm/best_n8.qasm.gz",
+     "qasm_bytes": 125185,
+     "qubits": 59,
+     "toffolis": 2308,
+     "cnots": 4472,
+     "nots": 432,
+     "gates": 7212,
+     "toffoli_depth": 1562,
+     "depth_all_gates": 3055,
+     "basis": {
+      "inputs": 250,
+      "failures": 0,
+      "first_failures": []
+     },
+     "seconds": 24.9
+    },
+    {
+     "n": 16,
+     "p": 65521,
+     "qasm": "qasm/best_n16.qasm.gz",
+     "qasm_bytes": 511150,
+     "qubits": 115,
+     "toffolis": 8876,
+     "cnots": 18650,
+     "nots": 1616,
+     "gates": 29142,
+     "toffoli_depth": 5860,
+     "depth_all_gates": 11091,
+     "basis": {
+      "inputs": 285,
+      "failures": 0,
+      "first_failures": []
+     },
+     "seconds": 138.8
+    },
+    {
+     "n": 32,
+     "p": 4294967291,
+     "qasm": "qasm/best_n32.qasm.gz",
+     "qasm_bytes": 2076870,
+     "qubits": 227,
+     "toffolis": 34572,
+     "cnots": 71440,
+     "nots": 6336,
+     "gates": 112348,
+     "toffoli_depth": 22450,
+     "depth_all_gates": 41157,
+     "basis": {
+      "inputs": 318,
+      "failures": 0,
+      "first_failures": []
+     },
+     "seconds": 775.9
+    }
+   ]
+  }
+ ],
+ "mps_selftest": {
+  "qubits": 14,
+  "gates": 400,
+  "checks": {
+   "hadamard": {
+    "probabilities_match": true,
+    "expectation_matches": true
+   },
+   "valid_compiled": {
+    "probabilities_match": true,
+    "expectation_matches": true
+   }
+  },
+  "passed": true,
+  "known_bad_primitives_not_used": [
+   "save_amplitudes (returned zeros after long circuits under MPS, statevector disagreed)",
+   "initialize (gave wrong probabilities and expectation values under MPS in this setting)"
+  ]
+ }
+}

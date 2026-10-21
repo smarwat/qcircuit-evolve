@@ -1,0 +1,624 @@
+{
+ "run_dir": "runs/smoke2",
+ "calls": 17,
+ "attempt_records": 19,
+ "models_answering": [
+  "claude-opus-5-5"
+ ],
+ "model_mismatches": 0,
+ "categories": {
+  "valid": 11,
+  "duplicate of an archived program": 3,
+  "wrong answer (public test)": 2,
+  "syntax error in the program": 1
+ },
+ "valid_rate": 0.6470588235294118,
+ "by_mode": {
+  "refine": {
+   "calls": 10,
+   "valid": 7,
+   "new_best": 6
+  },
+  "redesign": {
+   "calls": 7,
+   "valid": 4,
+   "new_best": 4
+  }
+ },
+ "edit_formats": {
+  "diff": 8,
+  "full": 9,
+  "null": 0
+ },
+ "seconds_per_call": {
+  "n": 17,
+  "mean": 208.85000000000002,
+  "median": 132.54,
+  "min": 23.38,
+  "max": 1109.13,
+  "total": 3550.4500000000003
+ },
+ "notional_usd_per_call": {
+  "n": 17,
+  "mean": 0.4615420117647059,
+  "median": 0.317318,
+  "min": 0.11562599999999999,
+  "max": 2.3374179999999996,
+  "total": 7.8462141999999995
+ },
+ "output_tokens_per_call": {
+  "n": 17,
+  "mean": 19668.764705882353,
+  "median": 12427,
+  "min": 2822,
+  "max": 113482,
+  "total": 334369
+ },
+ "context_tokens_per_call": {
+  "n": 17,
+  "mean": 13062.64705882353,
+  "median": 10753,
+  "min": 8957,
+  "max": 35298,
+  "total": 222065
+ },
+ "seed_best_tq": 42040320,
+ "final_best": {
+  "id": "g017_0_r2",
+  "T": 34572,
+  "Q": 227,
+  "score": 7847844,
+  "gen": 17
+ },
+ "improvement_factor": 5.356926055105071,
+ "series": [
+  {
+   "call": 0,
+   "id": "seeds",
+   "best_tq": 42040320
+  },
+  {
+   "call": 1,
+   "id": "g001_0",
+   "mode": "refine",
+   "category": "valid",
+   "score": 30667264,
+   "T": 86144,
+   "Q": 356,
+   "best_tq": 30667264,
+   "api_s": 261.11,
+   "notional_usd": 0.583528,
+   "output_tokens": 25594,
+   "model": "claude-opus-5-5",
+   "edit_format": "full"
+  },
+  {
+   "call": 2,
+   "id": "g002_0_r1",
+   "mode": "redesign",
+   "category": "valid",
+   "score": 14530936,
+   "T": 56104,
+   "Q": 259,
+   "best_tq": 14530936,
+   "api_s": 1109.13,
+   "notional_usd": 2.3374179999999996,
+   "output_tokens": 113482,
+   "model": "claude-opus-5-5",
+   "edit_format": "full"
+  },
+  {
+   "call": 3,
+   "id": "g003_0_r2",
+   "mode": "refine",
+   "category": "valid",
+   "score": 13326586,
+   "T": 51454,
+   "Q": 259,
+   "best_tq": 13326586,
+   "api_s": 96.6,
+   "notional_usd": 0.26442,
+   "output_tokens": 9207,
+   "model": "claude-opus-5-5",
+   "edit_format": "diff"
+  },
+  {
+   "call": 4,
+   "id": "g004_0_r2",
+   "mode": "refine",
+   "category": "valid",
+   "score": 13326586,
+   "T": 51454,
+   "Q": 259,
+   "best_tq": 13326586,
+   "api_s": 23.38,
+   "notional_usd": 0.11562599999999999,
+   "output_tokens": 2822,
+   "model": "claude-opus-5-5",
+   "edit_format": "full"
+  },
+  {
+   "call": 5,
+   "id": "g005_0_r2",
+   "mode": "refine",
+   "category": "syntax error in the program",
+   "score": null,
+   "T": null,
+   "Q": null,
+   "best_tq": 13326586,
+   "api_s": 37.13,
+   "notional_usd": 0.132258,
+   "output_tokens": 3498,
+   "model": "claude-opus-5-5",
+   "edit_format": "diff"
+  },
+  {
+   "call": 6,
+   "id": "g006_0_r2",
+   "mode": "redesign",
+   "category": "valid",
+   "score": 11785018,
+   "T": 45502,
+   "Q": 259,
+   "best_tq": 11785018,
+   "api_s": 228.69,
+   "notional_usd": 0.49094200000000005,
+   "output_tokens": 21429,
+   "model": "claude-opus-5-5",
+   "edit_format": "full"
+  },
+  {
+   "call": 7,
+   "id": "g007_0_r2",
+   "mode": "refine",
+   "category": "valid",
+   "score": 10965024,
+   "T": 42336,
+   "Q": 259,
+   "best_tq": 10965024,
+   "api_s": 103.23,
+   "notional_usd": 0.258454,
+   "output_tokens": 9853,
+   "model": "claude-opus-5-5",
+   "edit_format": "diff"
+  },
+  {
+   "call": 8,
+   "id": "g008_0_r2",
+   "mode": "redesign",
+   "category": "valid",
+   "score": 9079504,
+   "T": 35056,
+   "Q": 259,
+   "best_tq": 9079504,
+   "api_s": 218.81,
+   "notional_usd": 0.506026,
+   "output_tokens": 22180,
+   "model": "claude-opus-5-5",
+   "edit_format": "full"
+  },
+  {
+   "call": 9,
+   "id": "g009_0_r2",
+   "mode": "refine",
+   "category": "valid",
+   "score": 8913744,
+   "T": 34416,
+   "Q": 259,
+   "best_tq": 8913744,
+   "api_s": 132.54,
+   "notional_usd": 0.317318,
+   "output_tokens": 12427,
+   "model": "claude-opus-5-5",
+   "edit_format": "diff"
+  },
+  {
+   "call": 10,
+   "id": "g010_0_r2",
+   "mode": "redesign",
+   "category": "valid",
+   "score": 7938960,
+   "T": 34820,
+   "Q": 228,
+   "best_tq": 7938960,
+   "api_s": 655.7,
+   "notional_usd": 1.0055836,
+   "output_tokens": 46199,
+   "model": "claude-opus-5-5",
+   "edit_format": "full"
+  },
+  {
+   "call": 11,
+   "id": "g011_0_r2",
+   "mode": "redesign",
+   "category": "duplicate of an archived program",
+   "score": null,
+   "T": null,
+   "Q": null,
+   "best_tq": 7938960,
+   "api_s": 33.08,
+   "notional_usd": 0.179674,
+   "output_tokens": 4472,
+   "model": "claude-opus-5-5",
+   "edit_format": "full"
+  },
+  {
+   "call": 12,
+   "id": "g012_0_r2",
+   "mode": "refine",
+   "category": "wrong answer (public test)",
+   "score": null,
+   "T": null,
+   "Q": null,
+   "best_tq": 7938960,
+   "api_s": 172.05,
+   "notional_usd": 0.41136200000000006,
+   "output_tokens": 16060,
+   "model": "claude-opus-5-5",
+   "edit_format": "diff"
+  },
+  {
+   "call": 13,
+   "id": "g013_0_r2",
+   "mode": "refine",
+   "category": "valid",
+   "score": 7904140,
+   "T": 34820,
+   "Q": 227,
+   "best_tq": 7904140,
+   "api_s": 86.38,
+   "notional_usd": 0.1651886,
+   "output_tokens": 7984,
+   "model": "claude-opus-5-5",
+   "edit_format": "diff"
+  },
+  {
+   "call": 14,
+   "id": "g014_0_r2",
+   "mode": "refine",
+   "category": "wrong answer (public test)",
+   "score": null,
+   "T": null,
+   "Q": null,
+   "best_tq": 7904140,
+   "api_s": 139.97,
+   "notional_usd": 0.35739,
+   "output_tokens": 13047,
+   "model": "claude-opus-5-5",
+   "edit_format": "diff"
+  },
+  {
+   "call": 15,
+   "id": "g015_0_r2",
+   "mode": "redesign",
+   "category": "duplicate of an archived program",
+   "score": null,
+   "T": null,
+   "Q": null,
+   "best_tq": 7904140,
+   "api_s": 33.42,
+   "notional_usd": 0.18574999999999997,
+   "output_tokens": 4461,
+   "model": "claude-opus-5-5",
+   "edit_format": "full"
+  },
+  {
+   "call": 16,
+   "id": "g016_0_r2",
+   "mode": "redesign",
+   "category": "duplicate of an archived program",
+   "score": null,
+   "T": null,
+   "Q": null,
+   "best_tq": 7904140,
+   "api_s": 33.75,
+   "notional_usd": 0.18833,
+   "output_tokens": 4590,
+   "model": "claude-opus-5-5",
+   "edit_format": "full"
+  },
+  {
+   "call": 17,
+   "id": "g017_0_r2",
+   "mode": "refine",
+   "category": "valid",
+   "score": 7847844,
+   "T": 34572,
+   "Q": 227,
+   "best_tq": 7847844,
+   "api_s": 185.48,
+   "notional_usd": 0.346946,
+   "output_tokens": 17064,
+   "model": "claude-opus-5-5",
+   "edit_format": "diff"
+  }
+ ],
+ "lineage": [
+  {
+   "id": "seed_binary_euclid",
+   "parent": null,
+   "mode": "seed",
+   "T": 107520,
+   "Q": 391,
+   "score": 42040320,
+   "verified": true,
+   "edit_format": null,
+   "api_s": null,
+   "output_tokens": null,
+   "model_summary": null,
+   "diff_vs_parent": null
+  },
+  {
+   "id": "g001_0",
+   "parent": "seed_binary_euclid",
+   "mode": "refine",
+   "T": 86144,
+   "Q": 356,
+   "score": 30667264,
+   "verified": true,
+   "edit_format": "full",
+   "api_s": 261.11,
+   "output_tokens": 25594,
+   "model_summary": "The parent spends 26n+8 Toffolis per iteration. Three changes bring this to 21n+1 and cut Q by n+3.\n\n**Toffoli savings per iteration**\n- **Persistent swap.** I switch to the binary-GCD variant that keeps u odd. Each iteration: if v is odd and u > v, swap (u,x_u)\u2194(v,x_v) and do not swap back. Then set v = (v \u2212 [v odd]\u00b7u)/2 and x_v = (x_v \u2212 [v odd]\u00b7x_u)/2 mod p. This halves u\u00b7v every step, so bitlen(p(p\u22121)) \u2264 2n iterations suffice. The operated register is always V, so only 2 conditional swaps per iteration instead of 4, saving 2n.\n- **Cheaper bits.** The \"v odd\" history bit is now a CNOT copy, no Toffoli. The swap bit is computed with one carry chain and one Toffoli instead of two full comparisons, saving about 2n.\n- **Reused W.** W = h1&U is converted into h1&X_u for n Toffolis by conjugating with CNOTs X_u\u2192U. This saves n.\n\n**Qubit savings**\n- The input register is used directly as the ",
+   "diff_vs_parent": {
+    "lines_added": 54,
+    "lines_removed": 100,
+    "similarity": 0.49
+   }
+  },
+  {
+   "id": "g002_0_r1",
+   "parent": "g001_0",
+   "mode": "redesign",
+   "T": 56104,
+   "Q": 259,
+   "score": 14530936,
+   "verified": true,
+   "edit_format": "full",
+   "api_s": 1109.13,
+   "output_tokens": 113482,
+   "model_summary": "The redesign switches to Kaliski-style integer coefficients, so the loop does no modular arithmetic. The 2^iters scale factor is removed once at the end. Expected at n=32: about **T \u2248 56,100, Q = 259, T*Q \u2248 14.5M**. I could not run the evaluator here, so these figures are estimates.\n\n- **Coefficient update.** The registers CU and CV satisfy p = u\u00b7CU + v\u00b7CV. Each step adds one coefficient into the other (a plain 3n-Toffoli controlled Cuccaro adder, no W register) and doubles the other by relabelling the qubits for free.\n- **Growth after termination.** Once v reaches 0, CV keeps doubling. The bound 2^k \u2265 p+a gives X < 2^{iters+1}, so CV is 2n+1 qubits wide.\n- **Final correction.** With init u=a, v=p, CU=0, CV=1, the end state satisfies a\u00b7X \u2261 2^iters. A bit-serial Montgomery pass (about 2.6k Toffolis) turns X into a^-1. It uses the freed U, V and CU registers as scratch, and needs one compa",
+   "diff_vs_parent": {
+    "lines_added": 125,
+    "lines_removed": 82,
+    "similarity": 0.308
+   }
+  },
+  {
+   "id": "g003_0_r2",
+   "parent": "g002_0_r1",
+   "mode": "refine",
+   "T": 51454,
+   "Q": 259,
+   "score": 13326586,
+   "verified": true,
+   "edit_format": "diff",
+   "api_s": 96.6,
+   "output_tokens": 9207,
+   "model_summary": "The idea is to shrink the coefficient operations in the early iterations to the width they actually need. In this Kaliski-style loop, CU and CV start as 0 and 1, and each iteration at most doubles max(CU, CV). So before iteration `it` both are at most 2^it, and after the step (CU+CV, or 2\u00b7CV) they are at most 2^(it+1). That means all bits at or above `min(n, it+2)` are zero during that iteration.\n\nI restrict both coefficient cswaps and the controlled add to `wc = min(n, it+2)` bits. Swapping or adding zero high bits does nothing, so correctness and the parity-based recovery of the swap bit are untouched. The Bennett uncompute replays the same gates, so it shrinks the same way.\n\nThis saves 5 Toffolis per dropped bit, roughly 2,300 per pass and about 4,650 in total. I expect about T \u2248 51,450 and Q = 259 at n=32, so T*Q \u2248 13.3M.",
+   "diff_vs_parent": {
+    "lines_added": 4,
+    "lines_removed": 3,
+    "similarity": 0.98
+   }
+  },
+  {
+   "id": "g006_0_r2",
+   "parent": "g003_0_r2",
+   "mode": "redesign",
+   "T": 45502,
+   "Q": 259,
+   "score": 11785018,
+   "verified": true,
+   "edit_format": "full",
+   "api_s": 228.69,
+   "output_tokens": 21429,
+   "model_summary": "The idea is to make the U/V registers shrink as the GCD runs. Every binary-GCD step at least halves the product u\u00b7v, so before step `it` we have u\u00b7v \u2264 a\u00b7p/2^it < 2^(iters\u2212it). Both values are at least 1 until termination, and after that the state is (1, 0). So max(u, v) < 2^w with w = min(n, max(1, iters \u2212 it)). This bound is input-independent and holds for any n and p. The comparator, the U/V conditional swap and the controlled subtraction then only need the low w bits: the high bits are provably zero, and the subtraction never goes negative, so mod 2^w is exact. At n=32 this removes about 6\u00b7496 \u2248 3.0k Toffolis per pass, or about 6.0k with the Bennett uncompute. I expect T \u2248 45.5k and Q = 259 unchanged, so T\u00b7Q \u2248 11.8M. Everything else (coefficient handling, fixed-iteration Montgomery fix, uncompute) is the verified parent, unchanged.",
+   "diff_vs_parent": {
+    "lines_added": 23,
+    "lines_removed": 23,
+    "similarity": 0.866
+   }
+  },
+  {
+   "id": "g007_0_r2",
+   "parent": "g006_0_r2",
+   "mode": "refine",
+   "T": 42336,
+   "Q": 259,
+   "score": 10965024,
+   "verified": true,
+   "edit_format": "diff",
+   "api_s": 103.23,
+   "output_tokens": 9853,
+   "model_summary": "The parent swaps the coefficient registers twice per iteration: once in and once back out. This candidate keeps the coefficients in the same persistent swapped orientation as U and V, so one coefficient cswap per iteration, controlled by the delta bit d = s_cur \u2295 s_prev, does the job. Kaliski's step preserves \"one coefficient odd, one even\", and the just-doubled one (physical CV) is always even. So right after the d-controlled cswap, CV[0] equals d, and three CNOTs clear the spare bit with no stored history. This removes about 1,580 Toffolis from the forward pass, about 3,170 including the uncompute. I expect T \u2248 42,300 and Q = 259 (T*Q \u2248 10.96M) at n=32. I have not run it yet.",
+   "diff_vs_parent": {
+    "lines_added": 3,
+    "lines_removed": 2,
+    "similarity": 0.986
+   }
+  },
+  {
+   "id": "g008_0_r2",
+   "parent": "g007_0_r2",
+   "mode": "redesign",
+   "T": 35056,
+   "Q": 259,
+   "score": 9079504,
+   "verified": true,
+   "edit_format": "full",
+   "api_s": 218.81,
+   "output_tokens": 22180,
+   "model_summary": "The idea is to replace the bit-serial Montgomery fix-up with a radix-2^r version; the GCD stage is unchanged from the parent. I have not run this, so the T figure below is an estimate.\n\n**How it works.** The parent clears the 2^iters factor one bit at a time. Each step does a controlled add of (p+1)/2, at 2w Toffolis per bit, where w runs from about 64 down to 33. That is roughly 5.2k Toffolis forward and 10.4k after the Bennett pass.\n\nThe new version consumes r bits per step (r up to 6, chosen greedily per chunk):\n- Let x be the low r bits of the window. K(x) = (x + m(x)\u00b7p)/2^r, with m(x) = \u2212x\u00b7p\u207b\u00b9 mod 2^r, is a classical function of those bits.\n- Each bit of K(x) is written in algebraic normal form (XOR of AND-terms of the bits of x). Each AND-term of two or more bits is computed into a scratch qubit with one Toffoli.\n- K(x) is loaded into T with CNOTs, then a single add of T into the s",
+   "diff_vs_parent": {
+    "lines_added": 89,
+    "lines_removed": 11,
+    "similarity": 0.764
+   }
+  },
+  {
+   "id": "g009_0_r2",
+   "parent": "g008_0_r2",
+   "mode": "refine",
+   "T": 34416,
+   "Q": 259,
+   "score": 8913744,
+   "verified": true,
+   "edit_format": "diff",
+   "api_s": 132.54,
+   "output_tokens": 12427,
+   "model_summary": "Two exact parity facts let me drop bit 0 from the comparator and from the value subtraction. Expected at n=32: T \u2248 34,420 (down from 35,056), Q = 259 unchanged, so T*Q \u2248 8.91M.\n\n**Subtraction.** The subtraction only fires when h1 = 1, meaning both values are odd. Writing v = 2v'+1 and u = 2u'+1 gives (v \u2212 u) mod 2^w = 2\u00b7((v' \u2212 u') mod 2^(w\u22121)). So the controlled subtract runs only on bits 1..w\u22121. Bit 0 is cleared with a plain `cx(h1, V0)`, since V0 = 1 whenever h1 = 1. This saves 3 Toffolis per iteration.\n\n**Comparator.** The comparator's result is only used under h1, and then U0 = 1 and ~V0 = 0. So the carry out of bit 0 is exactly the incoming tie-break carry sp. The majority chain therefore starts at bit 1 with carry-in sp. When w = 1, the carry is sp itself, so the two `ccx(h1, sp, sc)` gates would cancel and both are skipped. This saves 2 Toffolis per iteration.\n\nBoth rewrites are e",
+   "diff_vs_parent": {
+    "lines_added": 16,
+    "lines_removed": 14,
+    "similarity": 0.94
+   }
+  },
+  {
+   "id": "g010_0_r2",
+   "parent": "g009_0_r2",
+   "mode": "redesign",
+   "T": 34820,
+   "Q": 228,
+   "score": 7938960,
+   "verified": true,
+   "edit_format": "full",
+   "api_s": 655.7,
+   "output_tokens": 46199,
+   "model_summary": "The idea is to store the history bit of late iterations in input qubits that are already guaranteed to be zero, instead of in a dedicated register. U\u00b7V \u2264 a\u00b7p/2^it < 2^(iters\u2212it), so at iteration it, while w = iters\u2212it < n, bit U[w] of the input register is zero. No later loop gate touches it, so h1 for that iteration goes into U[w]. Only the first iters\u2212n+1 history bits need fresh qubits (33 instead of 64 at n=32), and the Bennett reversal still restores the input exactly.\n\nThat removes U[1..n\u22121] from the Montgomery scratch pool. To compensate, the reduction phase now also takes its adder temporaries and monomial ancillas from the provably-zero high part of E. A classical planner picks the radix sequence and checks every step is feasible. It also decides how many spare ancillas, if any, to add, by minimising estimated T\u00b7Q.\n\nI have not run this candidate. I expect n=32 to come out around ",
+   "diff_vs_parent": {
+    "lines_added": 135,
+    "lines_removed": 77,
+    "similarity": 0.624
+   }
+  },
+  {
+   "id": "g013_0_r2",
+   "parent": "g010_0_r2",
+   "mode": "refine",
+   "T": 34820,
+   "Q": 227,
+   "score": 7904140,
+   "verified": true,
+   "edit_format": "diff",
+   "api_s": 86.38,
+   "output_tokens": 7984,
+   "model_summary": "Iteration 0's history bit can be cleared right after iteration 0, so the next iteration reuses its qubit instead of a fresh one. At iteration 0 we have V=p, CU=0 and CV=1, so h1 = a mod 2:\n- **a odd:** no swap, CU becomes 1, and the doubled CV is 2.\n- **a even:** the registers swap, CU becomes 1, and CV becomes 0.\n\nEither way, bit 1 of the doubled CV equals h1. One `cx(CV[1], h1)` returns the qubit to 0, and the reverse pass undoes that CNOT automatically. Iterations 0 and 1 then share fresh history qubit Hf[0], which saves one ancilla at no Toffoli cost. Expected at n=32: T=34,820 and Q=227, so T*Q is about 7,904,140.",
+   "diff_vs_parent": {
+    "lines_added": 7,
+    "lines_removed": 2,
+    "similarity": 0.986
+   }
+  },
+  {
+   "id": "g017_0_r2",
+   "parent": "g013_0_r2",
+   "mode": "refine",
+   "T": 34572,
+   "Q": 227,
+   "score": 7847844,
+   "verified": true,
+   "edit_format": "diff",
+   "api_s": 185.48,
+   "output_tokens": 17064,
+   "model_summary": "Kaliski coefficients satisfy max(CU, CV) \u2264 2^it before iteration `it`, because each step at most doubles the larger one. Both can equal 2^it only if p = (U+V)\u00b72^it, which the invariant V\u00b7CV + U\u00b7CU = p rules out for odd p. So the sum CU+CV fits in it+1 bits, and the coefficient swap/add width can drop from `min(n, it+2)` to `min(n, it+1)`. The it=0 trick still works: only bit 0 matters, since CU=0 and CV=1 at that point. This saves 4 Toffolis (1 cswap + 3 cadd) in each of iterations 0..30, so about 124 per pass and about 248 in total. I expect T \u2248 34,572 and Q = 227 at n=32, so T*Q \u2248 7.85M.",
+   "diff_vs_parent": {
+    "lines_added": 2,
+    "lines_removed": 2,
+    "similarity": 0.994
+   }
+  }
+ ],
+ "pareto_front": [
+  {
+   "T": 34416,
+   "Q": 259,
+   "TQ": 8913744
+  },
+  {
+   "T": 34572,
+   "Q": 227,
+   "TQ": 7847844
+  }
+ ],
+ "valid_programs": [
+  {
+   "id": "seed_binary_euclid",
+   "T": 107520,
+   "Q": 391,
+   "TQ": 42040320
+  },
+  {
+   "id": "seed_divsteps",
+   "T": 293248,
+   "Q": 470,
+   "TQ": 137826560
+  },
+  {
+   "id": "g001_0",
+   "T": 86144,
+   "Q": 356,
+   "TQ": 30667264
+  },
+  {
+   "id": "g002_0_r1",
+   "T": 56104,
+   "Q": 259,
+   "TQ": 14530936
+  },
+  {
+   "id": "g003_0_r2",
+   "T": 51454,
+   "Q": 259,
+   "TQ": 13326586
+  },
+  {
+   "id": "g004_0_r2",
+   "T": 51454,
+   "Q": 259,
+   "TQ": 13326586
+  },
+  {
+   "id": "g006_0_r2",
+   "T": 45502,
+   "Q": 259,
+   "TQ": 11785018
+  },
+  {
+   "id": "g007_0_r2",
+   "T": 42336,
+   "Q": 259,
+   "TQ": 10965024
+  },
+  {
+   "id": "g008_0_r2",
+   "T": 35056,
+   "Q": 259,
+   "TQ": 9079504
+  },
+  {
+   "id": "g009_0_r2",
+   "T": 34416,
+   "Q": 259,
+   "TQ": 8913744
+  },
+  {
+   "id": "g010_0_r2",
+   "T": 34820,
+   "Q": 228,
+   "TQ": 7938960
+  },
+  {
+   "id": "g013_0_r2",
+   "T": 34820,
+   "Q": 227,
+   "TQ": 7904140
+  },
+  {
+   "id": "g017_0_r2",
+   "T": 34572,
+   "Q": 227,
+   "TQ": 7847844
+  }
+ ]
+}

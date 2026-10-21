@@ -1,0 +1,509 @@
+[
+ {
+  "id": "seed_binary_euclid",
+  "gen": 0,
+  "parent": null,
+  "mode": "seed",
+  "source": "# Seed: reversible binary extended Euclid (Kaliski family), width-generic.\n#\n# Classical algorithm (u, v integers; x1, x2 residues mod p):\n#     u, v, x1, x2 = a, p, 1, 0          invariant: u = x1*a, v = x2*a (mod p)\n#     repeat 2n times:\n#         A  u even            : u = u/2,       x1 = x1/2 mod p\n#         B  u odd, v even     : v = v/2,       x2 = x2/2 mod p\n#         C  both odd, u > v   : u = (u-v)/2,   x1 = (x1-x2)/2 mod p\n#         D  both odd, u <= v  : v = (v-u)/2,   x2 = (x2-x1)/2 mod p\n#     end: u = 1, v = 0, so x1 = a^-1 mod p.\n# Every step at least halves u*v < 2^2n, so v reaches 0 within 2n steps;\n# after that case B (v = 0 is even) repeats harmlessly, so no \"done\" flag.\n# Halving x mod p instead of Kaliski's doubling means no Montgomery factor\n# 2^k to correct at the end.\n#\n# Reversible form, per iteration: store two history bits\n#     h1 = u0 & v0                 (subtract?)\n#     h0 = !u0 ^ (h1 & [u > v])    (operate on u/x1? else v/x2)\n# swap (u,x1) <-> (v,x2) when h0 = 0, so the operated register is always \"u\";\n# u -= v & h1; shift u right (a free relabel: its low bit is 0);\n# x1 = (x1 - (x2 & h1)) mod p; x1 = x1/2 mod p; swap back.\n# Then copy x1 to the output and run the whole forward pass in reverse\n# (Bennett), which clears u, v, x1, x2 and the 4n history bits.\n#\n# Cost: (26n + 8) Toffolis per iteration, 2n iterations, x2 for uncompute\n#       ~ 104 n^2 Toffolis; 10n + 7 ancillas.\n\n\ndef build_circuit(c, n, p):\n    # ---- registers (little-endian lists of qubit indices) -------------------\n    U = c.alloc(n)\n    V = c.alloc(n)\n    X1 = c.alloc(n)\n    X2 = c.alloc(n)\n    H = c.alloc(4 * n)        # 2 history bits per iteration\n    T = c.alloc(n + 1)        # holds classical constants temporarily\n    W = c.alloc(n)            # W = (operand & h1)\n    c0, z, flag, gt, o, xh = c.alloc(6)\n\n    # ---- arithmetic primitives ----------------------------------------------\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, carry=None):\n        # Cuccaro ripple adder: b += a (mod 2^len), carry ^= carry-out. 2m Toffolis.\n        m = len(a)\n        prev = c0\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        if carry is not None:\n            c.cx(a[m - 1], carry)\n        for i in range(m - 1, -1, -1):\n            uma(c0 if i == 0 else a[i - 1], b[i], a[i])\n\n    def sub(a, b):\n        # b -= a (mod 2^len)\n        m0 = c.mark()\n        add(a, b)\n        c.invert_since(m0)\n\n    def compare(a, b, out):\n        # out ^= [b > a]: carry-out of (~a + b), then uncompute. 2m Toffolis.\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = c0\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def add_const(k, b, ctrl=None):\n        # b += k (mod 2^len(b)), optionally controlled. Loading k is Toffoli-free.\n        t = T[: len(b)]\n        load(t, k, ctrl)\n        add(t, b)\n        load(t, k, ctrl)\n\n    def mod_add(a, b):\n        # b = (b + a) mod p for a, b in [0, p)\n        add(a, b, z)                         # (b,z) = a + b\n        bz = b + [z]\n        add_const((1 << (n + 1)) - p, bz)    # (b,z) = a + b - p; z = sign\n        c.cx(z, flag)\n        add_const(p, bz, flag)               # add p back if negative; z -> 0\n        compare(b, a, flag)                  # flag ^= [a > b]\n        c.x(flag)                            # flag was [b_new >= a]; now 0\n\n    def mod_sub(a, b):\n        # b = (b - a) mod p\n        m0 = c.mark()\n        mod_add(a, b)\n        c.invert_since(m0)\n\n    def mod_half(x, spare):\n        # x = x / 2 mod p. Returns the relabelled register and the new spare.\n        c.cx(x[0], o)                        # o = x odd\n        add_const(p, x + [spare], o)         # x + o*p is even, < 2^(n+1)\n        newx = x[1:] + [spare]               # shift right by relabelling\n        k = (p - 1) // 2\n        load(T[:n], k)\n        compare(T[:n], newx, o)              # o ^= [x/2 > (p-1)/2], which equals o\n        load(T[:n], k)\n        return newx, x[0]\n\n    def cswap(s, A, B):\n        for i in range(len(A)):\n            c.cx(B[i], A[i])\n            c.ccx(s, A[i], B[i])\n            c.cx(B[i], A[i])\n\n    # ---- forward pass -------------------------------------------------------\n    start = c.mark()\n    for i in range(n):\n        c.cx(c.inp[i], U[i])\n    load(V, p)\n    c.x(X1[0])\n\n    for it in range(2 * n):\n        h0 = H[2 * it]\n        h1 = H[2 * it + 1]\n        c.ccx(U[0], V[0], h1)\n        c.x(h0)\n        c.cx(U[0], h0)\n        compare(V, U, gt)                    # gt = [u > v]\n        c.ccx(h1, gt, h0)\n        compare(V, U, gt)                    # gt = 0\n        c.x(h0)                              # h0 now 1 iff we must swap\n        cswap(h0, U, V)\n        cswap(h0, X1, X2)\n\n        for i in range(n):\n            c.ccx(h1, V[i], W[i])\n        sub(W, U)\n        for i in range(n):\n            c.ccx(h1, V[i], W[i])\n        U = U[1:] + U[:1]                    # u is even: shift right for free\n\n        for i in range(n):\n            c.ccx(h1, X2[i], W[i])\n        mod_sub(W, X1)\n        for i in range(n):\n            c.ccx(h1, X2[i], W[i])\n        X1, xh = mod_half(X1, xh)\n\n        cswap(h0, X1, X2)\n        cswap(h0, U, V)\n        c.x(h0)                              # restore stored history bit\n    end = c.mark()\n\n    # ---- copy result, then uncompute everything -----------------------------\n    for i in range(n):\n        c.cx(X1[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 42040320,
+  "T": 107520,
+  "Q": 391,
+  "widths": [
+   {
+    "n": 4,
+    "T": 1792,
+    "Q": 55,
+    "gates": 5876
+   },
+   {
+    "n": 8,
+    "T": 6912,
+    "Q": 103,
+    "gates": 22504
+   },
+   {
+    "n": 16,
+    "T": 27136,
+    "Q": 199,
+    "gates": 87500
+   },
+   {
+    "n": 32,
+    "T": 107520,
+    "Q": 391,
+    "gates": 348064
+   }
+  ],
+  "scaling_exponent": 1.9863250631029234,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=     1,792  Q=   55  T*Q=        98,560  gates=    5,876  [pass]\n  n=8  p=251        T=     6,912  Q=  103  T*Q=       711,936  gates=   22,504  [pass]\n  n=16 p=65521      T=    27,136  Q=  199  T*Q=     5,400,064  gates=   87,500  [pass]\n  n=32 p=4294967291 T=   107,520  Q=  391  T*Q=    42,040,320  gates=  348,064  [pass]\nScaling exponent log2(T32/T16) = 1.986  (T ~ n^1.99; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 42,040,320  (lower is better)\nEvaluation time: 0.8s",
+  "verified": true
+ },
+ {
+  "id": "seed_divsteps",
+  "gen": 0,
+  "parent": null,
+  "mode": "seed",
+  "source": "# Seed: reversible Bernstein-Yang divsteps inversion, width-generic.\n#\n# Classical algorithm (f, g signed integers; u, v residues mod p):\n#     delta, f, g, u, v = 1, p, a, 0, 1      invariant: f = u*a, g = v*a (mod p)\n#     repeat ITERS times:\n#         if delta > 0 and g odd:   delta, f, g = 1 - delta, g, (g - f)/2\n#                                   u, v       = v, (v - u)/2 mod p\n#         elif g odd:               delta, g = 1 + delta, (g + f)/2;  v = (v + u)/2 mod p\n#         else:                     delta, g = 1 + delta, g/2;        v = v/2 mod p\n#     end: g = 0, f = +-1, so a^-1 = +-u mod p.\n# ITERS = floor((49n + 80)/17) is Bernstein-Yang's proven bound for n-bit inputs;\n# once g = 0 the \"g even\" case repeats harmlessly, so no \"done\" flag.\n#\n# Reversible form, per iteration: store s = [delta > 0] & g0 and t = g0.\n# The swap-and-subtract case is done without swaps or negations:\n#     g -= f; f += g     (f becomes old g, g becomes g - f)\n#     v -= u; u += v     (same on the coefficients, mod p)\n# then g += f, v += u when t & !s; arithmetic-shift g (a relabel plus one\n# CNOT for sign extension); v = v/2 mod p. delta is kept as e = delta - 1 so\n# that [delta > 0] is just the sign bit of e: case 1 is e = ~e (CNOTs), else\n# e += 1. Copy +-u to the output, then run the forward pass in reverse (Bennett).\n#\n# Cost ~ (46n + 40) Toffolis per iteration, ~2.9n iterations, x2 for uncompute.\n# More iterations than binary Euclid, but no n-bit comparator per step.\n\n\ndef build_circuit(c, n, p):\n    m = n + 2                                  # signed width of f, g\n    iters = (49 * n + 80) // 17\n    eb = (iters + 2).bit_length() + 1          # signed width of e = delta - 1\n\n    F = c.alloc(m)\n    G = c.alloc(m)\n    U = c.alloc(n)\n    V = c.alloc(n)\n    E = c.alloc(eb)\n    H = c.alloc(2 * iters)                     # history: s, t per iteration\n    T = c.alloc(max(n + 1, eb))                # classical constants\n    W = c.alloc(m)                             # W = operand & control\n    c0, z, flag, o, vsp, gsp, cc = c.alloc(7)\n\n    # ---- arithmetic primitives (same as the binary_euclid seed) -------------\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, carry=None):\n        # b += a (mod 2^len), carry ^= carry-out. Cuccaro, 2m Toffolis.\n        k = len(a)\n        prev = c0\n        for i in range(k):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        if carry is not None:\n            c.cx(a[k - 1], carry)\n        for i in range(k - 1, -1, -1):\n            uma(c0 if i == 0 else a[i - 1], b[i], a[i])\n\n    def sub(a, b):\n        m0 = c.mark()\n        add(a, b)\n        c.invert_since(m0)\n\n    def compare(a, b, out):\n        # out ^= [b > a]\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = c0\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def add_const(k, b, ctrl=None):\n        t = T[: len(b)]\n        load(t, k, ctrl)\n        add(t, b)\n        load(t, k, ctrl)\n\n    def mod_add(a, b):\n        # b = (b + a) mod p\n        add(a, b, z)\n        bz = b + [z]\n        add_const((1 << (n + 1)) - p, bz)\n        c.cx(z, flag)\n        add_const(p, bz, flag)\n        compare(b, a, flag)\n        c.x(flag)\n\n    def mod_sub(a, b):\n        m0 = c.mark()\n        mod_add(a, b)\n        c.invert_since(m0)\n\n    def mod_half(x, spare):\n        c.cx(x[0], o)\n        add_const(p, x + [spare], o)\n        newx = x[1:] + [spare]\n        k = (p - 1) // 2\n        load(T[:n], k)\n        compare(T[:n], newx, o)\n        load(T[:n], k)\n        return newx, x[0]\n\n    def and_into(ctrl, src, dst):\n        for i in range(len(src)):\n            c.ccx(ctrl, src[i], dst[i])\n\n    Wn = W[:n]\n\n    # ---- forward pass -------------------------------------------------------\n    start = c.mark()\n    load(F, p)\n    for i in range(n):\n        c.cx(c.inp[i], G[i])\n    c.x(V[0])\n\n    for it in range(iters):\n        s = H[2 * it]\n        t = H[2 * it + 1]\n        c.cx(G[0], t)                          # t = g odd\n        c.x(E[-1])\n        c.ccx(E[-1], G[0], s)                  # s = (e >= 0) & g odd\n        c.x(E[-1])\n        c.cx(t, cc)\n        c.cx(s, cc)                            # cc = t & !s  (s implies t)\n\n        # integers: case s: g -= f; f += g.  case cc: g += f.\n        and_into(s, F, W)\n        sub(W, G)\n        and_into(s, F, W)\n        and_into(s, G, W)\n        add(W, F)\n        and_into(s, G, W)\n        and_into(cc, F, W)\n        add(W, G)\n        and_into(cc, F, W)\n        c.cx(G[-1], gsp)                       # g is even: arithmetic shift right\n        G, gsp = G[1:] + [gsp], G[0]\n\n        # coefficients mod p: case s: v -= u; u += v.  case cc: v += u.  v /= 2.\n        and_into(s, U, Wn)\n        mod_sub(Wn, V)\n        and_into(s, U, Wn)\n        and_into(s, V, Wn)\n        mod_add(Wn, U)\n        and_into(s, V, Wn)\n        and_into(cc, U, Wn)\n        mod_add(Wn, V)\n        and_into(cc, U, Wn)\n        V, vsp = mod_half(V, vsp)\n\n        # e = delta - 1:  case s: e = ~e (delta = 1 - delta).  else e += 1.\n        for q in E:\n            c.cx(s, q)\n        c.x(s)\n        add_const(1, E, s)\n        c.x(s)\n\n        c.cx(t, cc)\n        c.cx(s, cc)                            # cc = 0\n    end = c.mark()\n\n    # ---- output +-u, then uncompute -----------------------------------------\n    for i in range(n):\n        c.cx(U[i], c.out[i])\n    sign = F[-1]                               # f = -1: a^-1 = p - u\n    for i in range(n):\n        c.cx(sign, c.out[i])                   # out = 2^n - 1 - u\n    add_const((p + 1) % (1 << n), c.out, sign) # out = p - u\n    c.append_inverse(start, end)\n",
+  "score": 137826560,
+  "T": 293248,
+  "Q": 470,
+  "widths": [
+   {
+    "n": 4,
+    "T": 7528,
+    "Q": 85,
+    "gates": 22230
+   },
+   {
+    "n": 8,
+    "T": 22642,
+    "Q": 138,
+    "gates": 66042
+   },
+   {
+    "n": 16,
+    "T": 78932,
+    "Q": 249,
+    "gates": 227814
+   },
+   {
+    "n": 32,
+    "T": 293248,
+    "Q": 470,
+    "gates": 845820
+   }
+  ],
+  "scaling_exponent": 1.8934390586766492,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=     7,528  Q=   85  T*Q=       639,880  gates=   22,230  [pass]\n  n=8  p=251        T=    22,642  Q=  138  T*Q=     3,124,596  gates=   66,042  [pass]\n  n=16 p=65521      T=    78,932  Q=  249  T*Q=    19,654,068  gates=  227,814  [pass]\n  n=32 p=4294967291 T=   293,248  Q=  470  T*Q=   137,826,560  gates=  845,820  [pass]\nScaling exponent log2(T32/T16) = 1.893  (T ~ n^1.89; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 137,826,560  (lower is better)\nEvaluation time: 1.2s",
+  "verified": true
+ },
+ {
+  "id": "g001_0",
+  "gen": 1,
+  "parent": "seed_binary_euclid",
+  "mode": "refine",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()        # <= 2n; u*v halves each step\n    V = list(c.inp)                           # v starts as a (restored by Bennett)\n    U = c.alloc(n)\n    XU = c.alloc(n)\n    XV = c.alloc(n)\n    H = c.alloc(2 * iters)\n    T = c.alloc(n)\n    W = c.alloc(n)\n    c0, z, o, xh = c.alloc(4)\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, carry=None):\n        m = len(a)\n        prev = c0\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        if carry is not None:\n            c.cx(a[m - 1], carry)\n        for i in range(m - 1, -1, -1):\n            uma(c0 if i == 0 else a[i - 1], b[i], a[i])\n\n    def sub(a, b):\n        m0 = c.mark()\n        add(a, b)\n        c.invert_since(m0)\n\n    def compare(a, b, out, ctrl=None):\n        # out ^= [b > a] (& ctrl)\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = c0\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        if ctrl is None:\n            c.cx(a[-1], out)\n        else:\n            c.ccx(ctrl, a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def add_const(k, b, ctrl=None, carry=None):\n        load(T, k, ctrl)\n        add(T, b, carry)\n        load(T, k, ctrl)\n\n    def mod_add(a, b):\n        # b = (b + a) mod p, z used as sign/flag and returned to 0\n        add(a, b, z)                              # (b,z) = a + b\n        add_const((1 << n) - p, b, None, z)       # (b,z) += 2^(n+1) - p ...\n        c.x(z)                                    # ... top-bit part\n        add_const(p, b, z)                        # add p back to low bits if negative\n        compare(b, a, z)                          # z ^= [a > b_new]\n        c.x(z)\n\n    def mod_sub(a, b):\n        m0 = c.mark()\n        mod_add(a, b)\n        c.invert_since(m0)\n\n    def mod_half(x, spare):\n        c.cx(x[0], o)\n        add_const(p, x, o, spare)                 # (x,spare) = x + o*p\n        newx = x[1:] + [spare]\n        k = (p - 1) // 2\n        load(T, k)\n        compare(T, newx, o)\n        load(T, k)\n        return newx, x[0]\n\n    def cswap(s, A, B):\n        for i in range(len(A)):\n            c.cx(B[i], A[i])\n            c.ccx(s, A[i], B[i])\n            c.cx(B[i], A[i])\n\n    start = c.mark()\n    load(U, p)\n    c.x(XV[0])\n\n    for it in range(iters):\n        h1 = H[2 * it]\n        s = H[2 * it + 1]\n        c.cx(V[0], h1)                            # h1 = v odd\n        compare(V, U, s, h1)                      # s = h1 & [u > v]\n        cswap(s, U, V)\n        cswap(s, XU, XV)\n\n        for i in range(n):\n            c.ccx(h1, U[i], W[i])                 # W = h1 & u\n        sub(W, V)\n        V = V[1:] + V[:1]                         # v even: shift right\n\n        for i in range(n):                        # W = h1 & xu\n            c.cx(XU[i], U[i])\n            c.ccx(h1, U[i], W[i])\n            c.cx(XU[i], U[i])\n        mod_sub(W, XV)\n        for i in range(n):\n            c.ccx(h1, XU[i], W[i])                # W = 0\n        XV, xh = mod_half(XV, xh)\n    end = c.mark()\n\n    for i in range(n):\n        c.cx(XU[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 30667264,
+  "T": 86144,
+  "Q": 356,
+  "widths": [
+   {
+    "n": 4,
+    "T": 1360,
+    "Q": 48,
+    "gates": 4652
+   },
+   {
+    "n": 8,
+    "T": 5408,
+    "Q": 92,
+    "gates": 18392
+   },
+   {
+    "n": 16,
+    "T": 21568,
+    "Q": 180,
+    "gates": 72620
+   },
+   {
+    "n": 32,
+    "T": 86144,
+    "Q": 356,
+    "gates": 291680
+   }
+  ],
+  "scaling_exponent": 1.9978579134284586,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=     1,360  Q=   48  T*Q=        65,280  gates=    4,652  [pass]\n  n=8  p=251        T=     5,408  Q=   92  T*Q=       497,536  gates=   18,392  [pass]\n  n=16 p=65521      T=    21,568  Q=  180  T*Q=     3,882,240  gates=   72,620  [pass]\n  n=32 p=4294967291 T=    86,144  Q=  356  T*Q=    30,667,264  gates=  291,680  [pass]\nScaling exponent log2(T32/T16) = 1.998  (T ~ n^2.00; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 30,667,264  (lower is better)\nEvaluation time: 0.8s",
+  "verified": true
+ },
+ {
+  "id": "g002_0_r1",
+  "gen": 2,
+  "parent": "g001_0",
+  "mode": "redesign",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    H = c.alloc(iters)\n    S = c.alloc(2)\n\n    # ---- Montgomery plan (classical) ----\n    B = ((2 * p - 2) << iters) // (p + 1)      # proven bound on final CV value\n    widths = []\n    needE = L\n    needT = 1\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        w = Bt.bit_length()\n        widths.append(w)\n        needE = max(needE, j + 1 + w)\n        needT = max(needT, w)\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    needT = max(needT, wY)\n    extE = needE - L - n\n    extT = needT - 2 * n\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(extT) if extT > 0 else []\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        # b += ctl * a (mod 2^m), 3m Toffolis\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        # out ^= [b > a]\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = H[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]                      # zero during the iteration\n        if it == 0:\n            c.cx(U[0], h1)               # v = p odd\n            c.cx(U[0], sc)\n            c.x(sc)                      # s = u even ([a > p] = 0)\n        else:\n            c.ccx(U[0], V[0], h1)        # h1 = both odd (swap-symmetric)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)          # sc = logical u0\n            c.cx(V[0], U[0])\n            c.x(sc)\n            for q in V:\n                c.x(q)\n            m0 = c.mark()\n            prev = sp                    # carry-in sp: gives [U >= V] if swapped\n            for i in range(n):\n                maj(prev, U[i], V[i])\n                prev = V[i]\n            m1 = c.mark()\n            c.ccx(h1, V[n - 1], sc)\n            c.append_inverse(m0, m1)\n            for q in V:\n                c.x(q)\n            c.ccx(h1, sp, sc)            # logical [u > v] = carry ^ sp\n            c.cx(sp, sc)\n        cswap(sc, U, V)                  # merged unswap(prev) + swap(cur)\n        if it > 0:\n            c.cx(sp, sc)\n            c.cx(CV[0], sp)              # previous s = parity of CV\n        cswap(sc, CU, CV[:n])\n        csub(h1, U, V, cz)\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:n], CU, cz)\n        CV = CV[-1:] + CV[:-1]           # double partner by relabel\n        cswap(sc, CU, CV[:n])\n\n    # u = 1, v = 0, CU = p: clear to use as scratch\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TS = V + U + TX\n    cin = S[0]\n    f = S[1]\n    kk = (p + 1) // 2\n    for j in range(iters):\n        w = widths[j]\n        b = E[j]\n        R = E[j + 1:j + 1 + w]\n        T = TS[:w]\n        load(T, kk, b)\n        add(T, R, cin)\n        load(T, kk, b)\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TS[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 14530936,
+  "T": 56104,
+  "Q": 259,
+  "widths": [
+   {
+    "n": 4,
+    "T": 948,
+    "Q": 35,
+    "gates": 2846
+   },
+   {
+    "n": 8,
+    "T": 3640,
+    "Q": 67,
+    "gates": 10852
+   },
+   {
+    "n": 16,
+    "T": 14212,
+    "Q": 131,
+    "gates": 42350
+   },
+   {
+    "n": 32,
+    "T": 56104,
+    "Q": 259,
+    "gates": 168028
+   }
+  ],
+  "scaling_exponent": 1.9809940393418037,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       948  Q=   35  T*Q=        33,180  gates=    2,846  [pass]\n  n=8  p=251        T=     3,640  Q=   67  T*Q=       243,880  gates=   10,852  [pass]\n  n=16 p=65521      T=    14,212  Q=  131  T*Q=     1,861,772  gates=   42,350  [pass]\n  n=32 p=4294967291 T=    56,104  Q=  259  T*Q=    14,530,936  gates=  168,028  [pass]\nScaling exponent log2(T32/T16) = 1.981  (T ~ n^1.98; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 14,530,936  (lower is better)\nEvaluation time: 0.7s",
+  "verified": true
+ },
+ {
+  "id": "g003_0_r2",
+  "gen": 3,
+  "parent": "g002_0_r1",
+  "mode": "refine",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    H = c.alloc(iters)\n    S = c.alloc(2)\n\n    # ---- Montgomery plan (classical) ----\n    B = ((2 * p - 2) << iters) // (p + 1)      # proven bound on final CV value\n    widths = []\n    needE = L\n    needT = 1\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        w = Bt.bit_length()\n        widths.append(w)\n        needE = max(needE, j + 1 + w)\n        needT = max(needT, w)\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    needT = max(needT, wY)\n    extE = needE - L - n\n    extT = needT - 2 * n\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(extT) if extT > 0 else []\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        # b += ctl * a (mod 2^m), 3m Toffolis\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        # out ^= [b > a]\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = H[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]                      # zero during the iteration\n        if it == 0:\n            c.cx(U[0], h1)               # v = p odd\n            c.cx(U[0], sc)\n            c.x(sc)                      # s = u even ([a > p] = 0)\n        else:\n            c.ccx(U[0], V[0], h1)        # h1 = both odd (swap-symmetric)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)          # sc = logical u0\n            c.cx(V[0], U[0])\n            c.x(sc)\n            for q in V:\n                c.x(q)\n            m0 = c.mark()\n            prev = sp                    # carry-in sp: gives [U >= V] if swapped\n            for i in range(n):\n                maj(prev, U[i], V[i])\n                prev = V[i]\n            m1 = c.mark()\n            c.ccx(h1, V[n - 1], sc)\n            c.append_inverse(m0, m1)\n            for q in V:\n                c.x(q)\n            c.ccx(h1, sp, sc)            # logical [u > v] = carry ^ sp\n            c.cx(sp, sc)\n        wc = min(n, it + 2)              # coefficients <= 2^(it+1) here\n        cswap(sc, U, V)                  # merged unswap(prev) + swap(cur)\n        if it > 0:\n            c.cx(sp, sc)\n            c.cx(CV[0], sp)              # previous s = parity of CV\n        cswap(sc, CU[:wc], CV[:wc])\n        csub(h1, U, V, cz)\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:wc], CU[:wc], cz)\n        CV = CV[-1:] + CV[:-1]           # double partner by relabel\n        cswap(sc, CU[:wc], CV[:wc])\n\n    # u = 1, v = 0, CU = p: clear to use as scratch\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TS = V + U + TX\n    cin = S[0]\n    f = S[1]\n    kk = (p + 1) // 2\n    for j in range(iters):\n        w = widths[j]\n        b = E[j]\n        R = E[j + 1:j + 1 + w]\n        T = TS[:w]\n        load(T, kk, b)\n        add(T, R, cin)\n        load(T, kk, b)\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TS[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 13326586,
+  "T": 51454,
+  "Q": 259,
+  "widths": [
+   {
+    "n": 4,
+    "T": 918,
+    "Q": 35,
+    "gates": 2768
+   },
+   {
+    "n": 8,
+    "T": 3430,
+    "Q": 67,
+    "gates": 10306
+   },
+   {
+    "n": 16,
+    "T": 13162,
+    "Q": 131,
+    "gates": 39620
+   },
+   {
+    "n": 32,
+    "T": 51454,
+    "Q": 259,
+    "gates": 155938
+   }
+  ],
+  "scaling_exponent": 1.9669045086595092,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       918  Q=   35  T*Q=        32,130  gates=    2,768  [pass]\n  n=8  p=251        T=     3,430  Q=   67  T*Q=       229,810  gates=   10,306  [pass]\n  n=16 p=65521      T=    13,162  Q=  131  T*Q=     1,724,222  gates=   39,620  [pass]\n  n=32 p=4294967291 T=    51,454  Q=  259  T*Q=    13,326,586  gates=  155,938  [pass]\nScaling exponent log2(T32/T16) = 1.967  (T ~ n^1.97; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 13,326,586  (lower is better)\nEvaluation time: 0.7s",
+  "verified": true
+ },
+ {
+  "id": "g004_0_r2",
+  "gen": 4,
+  "parent": "g001_0",
+  "mode": "refine",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    H = c.alloc(iters)\n    S = c.alloc(2)\n\n    B = ((2 * p - 2) << iters) // (p + 1)\n    widths = []\n    needE = L\n    needT = 1\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        w = Bt.bit_length()\n        widths.append(w)\n        needE = max(needE, j + 1 + w)\n        needT = max(needT, w)\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    needT = max(needT, wY)\n    extE = needE - L - n\n    extT = needT - 2 * n\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(extT) if extT > 0 else []\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = H[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]\n        if it == 0:\n            c.cx(U[0], h1)\n            c.cx(U[0], sc)\n            c.x(sc)\n        else:\n            c.ccx(U[0], V[0], h1)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)\n            c.cx(V[0], U[0])\n            c.x(sc)\n            for q in V:\n                c.x(q)\n            m0 = c.mark()\n            prev = sp\n            for i in range(n):\n                maj(prev, U[i], V[i])\n                prev = V[i]\n            m1 = c.mark()\n            c.ccx(h1, V[n - 1], sc)\n            c.append_inverse(m0, m1)\n            for q in V:\n                c.x(q)\n            c.ccx(h1, sp, sc)\n            c.cx(sp, sc)\n        wc = min(n, it + 2)\n        cswap(sc, U, V)\n        if it > 0:\n            c.cx(sp, sc)\n            c.cx(CV[0], sp)\n        cswap(sc, CU[:wc], CV[:wc])\n        csub(h1, U, V, cz)\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:wc], CU[:wc], cz)\n        CV = CV[-1:] + CV[:-1]\n        cswap(sc, CU[:wc], CV[:wc])\n\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TS = V + U + TX\n    cin = S[0]\n    f = S[1]\n    kk = (p + 1) // 2\n    for j in range(iters):\n        w = widths[j]\n        b = E[j]\n        R = E[j + 1:j + 1 + w]\n        T = TS[:w]\n        load(T, kk, b)\n        add(T, R, cin)\n        load(T, kk, b)\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TS[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 13326586,
+  "T": 51454,
+  "Q": 259,
+  "widths": [
+   {
+    "n": 4,
+    "T": 918,
+    "Q": 35,
+    "gates": 2768
+   },
+   {
+    "n": 8,
+    "T": 3430,
+    "Q": 67,
+    "gates": 10306
+   },
+   {
+    "n": 16,
+    "T": 13162,
+    "Q": 131,
+    "gates": 39620
+   },
+   {
+    "n": 32,
+    "T": 51454,
+    "Q": 259,
+    "gates": 155938
+   }
+  ],
+  "scaling_exponent": 1.9669045086595092,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       918  Q=   35  T*Q=        32,130  gates=    2,768  [pass]\n  n=8  p=251        T=     3,430  Q=   67  T*Q=       229,810  gates=   10,306  [pass]\n  n=16 p=65521      T=    13,162  Q=  131  T*Q=     1,724,222  gates=   39,620  [pass]\n  n=32 p=4294967291 T=    51,454  Q=  259  T*Q=    13,326,586  gates=  155,938  [pass]\nScaling exponent log2(T32/T16) = 1.967  (T ~ n^1.97; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 13,326,586  (lower is better)\nEvaluation time: 0.7s",
+  "verified": null
+ },
+ {
+  "id": "g006_0_r2",
+  "gen": 6,
+  "parent": "g003_0_r2",
+  "mode": "redesign",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    H = c.alloc(iters)\n    S = c.alloc(2)\n\n    B = ((2 * p - 2) << iters) // (p + 1)\n    widths = []\n    needE = L\n    needT = 1\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        w = Bt.bit_length()\n        widths.append(w)\n        needE = max(needE, j + 1 + w)\n        needT = max(needT, w)\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    needT = max(needT, wY)\n    extE = needE - L - n\n    extT = needT - 2 * n\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(extT) if extT > 0 else []\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = H[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]\n        # u*v <= a*p/2^it < 2^(iters-it): both values fit in w bits\n        w = min(n, max(1, iters - it))\n        Uw = U[:w]\n        Vw = V[:w]\n        if it == 0:\n            c.cx(U[0], h1)\n            c.cx(U[0], sc)\n            c.x(sc)\n        else:\n            c.ccx(U[0], V[0], h1)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)\n            c.cx(V[0], U[0])\n            c.x(sc)\n            for q in Vw:\n                c.x(q)\n            m0 = c.mark()\n            prev = sp\n            for i in range(w):\n                maj(prev, Uw[i], Vw[i])\n                prev = Vw[i]\n            m1 = c.mark()\n            c.ccx(h1, Vw[w - 1], sc)\n            c.append_inverse(m0, m1)\n            for q in Vw:\n                c.x(q)\n            c.ccx(h1, sp, sc)\n            c.cx(sp, sc)\n        wc = min(n, it + 2)\n        cswap(sc, Uw, Vw)\n        if it > 0:\n            c.cx(sp, sc)\n            c.cx(CV[0], sp)\n        cswap(sc, CU[:wc], CV[:wc])\n        csub(h1, Uw, Vw, cz)\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:wc], CU[:wc], cz)\n        CV = CV[-1:] + CV[:-1]\n        cswap(sc, CU[:wc], CV[:wc])\n\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TS = V + U + TX\n    cin = S[0]\n    f = S[1]\n    kk = (p + 1) // 2\n    for j in range(iters):\n        w = widths[j]\n        b = E[j]\n        R = E[j + 1:j + 1 + w]\n        T = TS[:w]\n        load(T, kk, b)\n        add(T, R, cin)\n        load(T, kk, b)\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TS[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 11785018,
+  "T": 45502,
+  "Q": 259,
+  "widths": [
+   {
+    "n": 4,
+    "T": 846,
+    "Q": 35,
+    "gates": 2552
+   },
+   {
+    "n": 8,
+    "T": 3094,
+    "Q": 67,
+    "gates": 9298
+   },
+   {
+    "n": 16,
+    "T": 11722,
+    "Q": 131,
+    "gates": 35300
+   },
+   {
+    "n": 32,
+    "T": 45502,
+    "Q": 259,
+    "gates": 138082
+   }
+  ],
+  "scaling_exponent": 1.9567112166350202,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       846  Q=   35  T*Q=        29,610  gates=    2,552  [pass]\n  n=8  p=251        T=     3,094  Q=   67  T*Q=       207,298  gates=    9,298  [pass]\n  n=16 p=65521      T=    11,722  Q=  131  T*Q=     1,535,582  gates=   35,300  [pass]\n  n=32 p=4294967291 T=    45,502  Q=  259  T*Q=    11,785,018  gates=  138,082  [pass]\nScaling exponent log2(T32/T16) = 1.957  (T ~ n^1.96; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 11,785,018  (lower is better)\nEvaluation time: 0.7s",
+  "verified": true
+ },
+ {
+  "id": "g007_0_r2",
+  "gen": 7,
+  "parent": "g006_0_r2",
+  "mode": "refine",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    H = c.alloc(iters)\n    S = c.alloc(2)\n\n    B = ((2 * p - 2) << iters) // (p + 1)\n    widths = []\n    needE = L\n    needT = 1\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        w = Bt.bit_length()\n        widths.append(w)\n        needE = max(needE, j + 1 + w)\n        needT = max(needT, w)\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    needT = max(needT, wY)\n    extE = needE - L - n\n    extT = needT - 2 * n\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(extT) if extT > 0 else []\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = H[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]\n        # u*v <= a*p/2^it < 2^(iters-it): both values fit in w bits\n        w = min(n, max(1, iters - it))\n        Uw = U[:w]\n        Vw = V[:w]\n        if it == 0:\n            c.cx(U[0], h1)\n            c.cx(U[0], sc)\n            c.x(sc)\n        else:\n            c.ccx(U[0], V[0], h1)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)\n            c.cx(V[0], U[0])\n            c.x(sc)\n            for q in Vw:\n                c.x(q)\n            m0 = c.mark()\n            prev = sp\n            for i in range(w):\n                maj(prev, Uw[i], Vw[i])\n                prev = Vw[i]\n            m1 = c.mark()\n            c.ccx(h1, Vw[w - 1], sc)\n            c.append_inverse(m0, m1)\n            for q in Vw:\n                c.x(q)\n            c.ccx(h1, sp, sc)\n            c.cx(sp, sc)\n        wc = min(n, it + 2)\n        cswap(sc, Uw, Vw)\n        cswap(sc, CU[:wc], CV[:wc])\n        if it > 0:\n            # sc = d, sp = o_old, CV[0] = d (doubled coeff was even, other odd)\n            c.cx(sp, sc)\n            c.cx(sc, sp)\n            c.cx(CV[0], sp)\n        csub(h1, Uw, Vw, cz)\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:wc], CU[:wc], cz)\n        CV = CV[-1:] + CV[:-1]\n\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TS = V + U + TX\n    cin = S[0]\n    f = S[1]\n    kk = (p + 1) // 2\n    for j in range(iters):\n        w = widths[j]\n        b = E[j]\n        R = E[j + 1:j + 1 + w]\n        T = TS[:w]\n        load(T, kk, b)\n        add(T, R, cin)\n        load(T, kk, b)\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TS[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 10965024,
+  "T": 42336,
+  "Q": 259,
+  "widths": [
+   {
+    "n": 4,
+    "T": 788,
+    "Q": 35,
+    "gates": 2392
+   },
+   {
+    "n": 8,
+    "T": 2880,
+    "Q": 67,
+    "gates": 8686
+   },
+   {
+    "n": 16,
+    "T": 10908,
+    "Q": 131,
+    "gates": 32920
+   },
+   {
+    "n": 32,
+    "T": 42336,
+    "Q": 259,
+    "gates": 128710
+   }
+  ],
+  "scaling_exponent": 1.9564983613634135,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       788  Q=   35  T*Q=        27,580  gates=    2,392  [pass]\n  n=8  p=251        T=     2,880  Q=   67  T*Q=       192,960  gates=    8,686  [pass]\n  n=16 p=65521      T=    10,908  Q=  131  T*Q=     1,428,948  gates=   32,920  [pass]\n  n=32 p=4294967291 T=    42,336  Q=  259  T*Q=    10,965,024  gates=  128,710  [pass]\nScaling exponent log2(T32/T16) = 1.956  (T ~ n^1.96; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 10,965,024  (lower is better)\nEvaluation time: 0.7s",
+  "verified": true
+ },
+ {
+  "id": "g008_0_r2",
+  "gen": 8,
+  "parent": "g007_0_r2",
+  "mode": "redesign",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    H = c.alloc(iters)\n    S = c.alloc(2)\n\n    B = ((2 * p - 2) << iters) // (p + 1)\n    needE = L\n    needT = 1\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        w = Bt.bit_length()\n        needE = max(needE, j + 1 + w)\n        needT = max(needT, w)\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    needT = max(needT, wY)\n    extE = needE - L - n\n    extT = needT - 2 * n\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(extT) if extT > 0 else []\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    def popc(x):\n        return bin(x).count('1')\n\n    def inv2r(r):\n        mod = 1 << r\n        t = 1\n        for _ in range(r + 2):\n            t = (t * (2 - p * t)) % mod\n        return t\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = H[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]\n        w = min(n, max(1, iters - it))\n        Uw = U[:w]\n        Vw = V[:w]\n        if it == 0:\n            c.cx(U[0], h1)\n            c.cx(U[0], sc)\n            c.x(sc)\n        else:\n            c.ccx(U[0], V[0], h1)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)\n            c.cx(V[0], U[0])\n            c.x(sc)\n            for q in Vw:\n                c.x(q)\n            m0 = c.mark()\n            prev = sp\n            for i in range(w):\n                maj(prev, Uw[i], Vw[i])\n                prev = Vw[i]\n            m1 = c.mark()\n            c.ccx(h1, Vw[w - 1], sc)\n            c.append_inverse(m0, m1)\n            for q in Vw:\n                c.x(q)\n            c.ccx(h1, sp, sc)\n            c.cx(sp, sc)\n        wc = min(n, it + 2)\n        cswap(sc, Uw, Vw)\n        cswap(sc, CU[:wc], CV[:wc])\n        if it > 0:\n            c.cx(sp, sc)\n            c.cx(sc, sp)\n            c.cx(CV[0], sp)\n        csub(h1, Uw, Vw, cz)\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:wc], CU[:wc], cz)\n        CV = CV[-1:] + CV[:-1]\n\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TS = V + U + TX\n    cin = S[0]\n    f = S[1]\n    lenE = len(E)\n    lenTS = len(TS)\n\n    # radix-2^r Montgomery reduction of the 2^iters factor\n    j = 0\n    Bc = B\n    while j < iters:\n        best = None\n        for r in range(1, min(6, iters - j) + 1):\n            mod = 1 << r\n            ip = inv2r(r)\n            Bn = (Bc + (mod - 1) * p) >> r\n            w = Bn.bit_length()\n            if w > lenTS or j + r + w > lenE:\n                continue\n            Ks = [(x + ((-x * ip) % mod) * p) >> r for x in range(mod)]\n            kb = max(Ks).bit_length()\n            if kb > w:\n                continue\n            anf = []\n            mons = set()\n            for i in range(kb):\n                co = [(K >> i) & 1 for K in Ks]\n                for k in range(r):\n                    for x in range(mod):\n                        if (x >> k) & 1:\n                            co[x] ^= co[x ^ (1 << k)]\n                terms = [x for x in range(mod) if co[x]]\n                anf.append(terms)\n                for x in terms:\n                    if popc(x) >= 2:\n                        mons.add(x)\n            stack = list(mons)\n            while stack:\n                s = stack.pop()\n                hb = s.bit_length() - 1\n                par = s ^ (1 << hb)\n                if popc(par) >= 2 and par not in mons:\n                    mons.add(par)\n                    stack.append(par)\n            M = len(mons)\n            pool_sz = (lenTS - w) + (lenE - (j + r + w)) + 1\n            if M > pool_sz:\n                continue\n            cost = (2.0 * w + 2.0 * M) / r\n            if best is None or cost < best[0]:\n                best = (cost, r, w, Bn, anf, mons)\n        cost, r, w, Bn, anf, mons = best\n        X = E[j:j + r]\n        R = E[j + r:j + r + w]\n        T = TS[:w]\n        pool = TS[w:] + E[j + r + w:] + [f]\n        order = sorted([(popc(s), s) for s in mons])\n        mq = {}\n        m0 = c.mark()\n        for idx in range(len(order)):\n            s = order[idx][1]\n            q = pool[idx]\n            mq[s] = q\n            hb = s.bit_length() - 1\n            par = s ^ (1 << hb)\n            if popc(par) >= 2:\n                a = mq[par]\n            else:\n                a = X[par.bit_length() - 1]\n            c.ccx(a, X[hb], q)\n        for i in range(len(anf)):\n            for s in anf[i]:\n                pc = popc(s)\n                if s == 0:\n                    c.x(T[i])\n                elif pc == 1:\n                    c.cx(X[s.bit_length() - 1], T[i])\n                else:\n                    c.cx(mq[s], T[i])\n        m1 = c.mark()\n        add(T, R, cin)\n        c.append_inverse(m0, m1)\n        Bc = Bn\n        j += r\n\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TS[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 9079504,
+  "T": 35056,
+  "Q": 259,
+  "widths": [
+   {
+    "n": 4,
+    "T": 700,
+    "Q": 35,
+    "gates": 2132
+   },
+   {
+    "n": 8,
+    "T": 2500,
+    "Q": 67,
+    "gates": 7746
+   },
+   {
+    "n": 16,
+    "T": 9248,
+    "Q": 131,
+    "gates": 30628
+   },
+   {
+    "n": 32,
+    "T": 35056,
+    "Q": 259,
+    "gates": 117846
+   }
+  ],
+  "scaling_exponent": 1.9224480864895437,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       700  Q=   35  T*Q=        24,500  gates=    2,132  [pass]\n  n=8  p=251        T=     2,500  Q=   67  T*Q=       167,500  gates=    7,746  [pass]\n  n=16 p=65521      T=     9,248  Q=  131  T*Q=     1,211,488  gates=   30,628  [pass]\n  n=32 p=4294967291 T=    35,056  Q=  259  T*Q=     9,079,504  gates=  117,846  [pass]\nScaling exponent log2(T32/T16) = 1.922  (T ~ n^1.92; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 9,079,504  (lower is better)\nEvaluation time: 0.7s",
+  "verified": true
+ },
+ {
+  "id": "g009_0_r2",
+  "gen": 9,
+  "parent": "g008_0_r2",
+  "mode": "refine",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    H = c.alloc(iters)\n    S = c.alloc(2)\n\n    B = ((2 * p - 2) << iters) // (p + 1)\n    needE = L\n    needT = 1\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        w = Bt.bit_length()\n        needE = max(needE, j + 1 + w)\n        needT = max(needT, w)\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    needT = max(needT, wY)\n    extE = needE - L - n\n    extT = needT - 2 * n\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(extT) if extT > 0 else []\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    def popc(x):\n        return bin(x).count('1')\n\n    def inv2r(r):\n        mod = 1 << r\n        t = 1\n        for _ in range(r + 2):\n            t = (t * (2 - p * t)) % mod\n        return t\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = H[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]\n        w = min(n, max(1, iters - it))\n        Uw = U[:w]\n        Vw = V[:w]\n        if it == 0:\n            c.cx(U[0], h1)\n            c.cx(U[0], sc)\n            c.x(sc)\n        else:\n            c.ccx(U[0], V[0], h1)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)\n            c.cx(V[0], U[0])\n            c.x(sc)\n            if w > 1:\n                for q in Vw[1:]:\n                    c.x(q)\n                m0 = c.mark()\n                prev = sp\n                for i in range(1, w):\n                    maj(prev, Uw[i], Vw[i])\n                    prev = Vw[i]\n                m1 = c.mark()\n                c.ccx(h1, Vw[w - 1], sc)\n                c.append_inverse(m0, m1)\n                for q in Vw[1:]:\n                    c.x(q)\n                c.ccx(h1, sp, sc)\n            c.cx(sp, sc)\n        wc = min(n, it + 2)\n        cswap(sc, Uw, Vw)\n        cswap(sc, CU[:wc], CV[:wc])\n        if it > 0:\n            c.cx(sp, sc)\n            c.cx(sc, sp)\n            c.cx(CV[0], sp)\n        csub(h1, Uw[1:], Vw[1:], cz)\n        c.cx(h1, Vw[0])\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:wc], CU[:wc], cz)\n        CV = CV[-1:] + CV[:-1]\n\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TS = V + U + TX\n    cin = S[0]\n    f = S[1]\n    lenE = len(E)\n    lenTS = len(TS)\n\n    # radix-2^r Montgomery reduction of the 2^iters factor\n    j = 0\n    Bc = B\n    while j < iters:\n        best = None\n        for r in range(1, min(6, iters - j) + 1):\n            mod = 1 << r\n            ip = inv2r(r)\n            Bn = (Bc + (mod - 1) * p) >> r\n            w = Bn.bit_length()\n            if w > lenTS or j + r + w > lenE:\n                continue\n            Ks = [(x + ((-x * ip) % mod) * p) >> r for x in range(mod)]\n            kb = max(Ks).bit_length()\n            if kb > w:\n                continue\n            anf = []\n            mons = set()\n            for i in range(kb):\n                co = [(K >> i) & 1 for K in Ks]\n                for k in range(r):\n                    for x in range(mod):\n                        if (x >> k) & 1:\n                            co[x] ^= co[x ^ (1 << k)]\n                terms = [x for x in range(mod) if co[x]]\n                anf.append(terms)\n                for x in terms:\n                    if popc(x) >= 2:\n                        mons.add(x)\n            stack = list(mons)\n            while stack:\n                s = stack.pop()\n                hb = s.bit_length() - 1\n                par = s ^ (1 << hb)\n                if popc(par) >= 2 and par not in mons:\n                    mons.add(par)\n                    stack.append(par)\n            M = len(mons)\n            pool_sz = (lenTS - w) + (lenE - (j + r + w)) + 1\n            if M > pool_sz:\n                continue\n            cost = (2.0 * w + 2.0 * M) / r\n            if best is None or cost < best[0]:\n                best = (cost, r, w, Bn, anf, mons)\n        cost, r, w, Bn, anf, mons = best\n        X = E[j:j + r]\n        R = E[j + r:j + r + w]\n        T = TS[:w]\n        pool = TS[w:] + E[j + r + w:] + [f]\n        order = sorted([(popc(s), s) for s in mons])\n        mq = {}\n        m0 = c.mark()\n        for idx in range(len(order)):\n            s = order[idx][1]\n            q = pool[idx]\n            mq[s] = q\n            hb = s.bit_length() - 1\n            par = s ^ (1 << hb)\n            if popc(par) >= 2:\n                a = mq[par]\n            else:\n                a = X[par.bit_length() - 1]\n            c.ccx(a, X[hb], q)\n        for i in range(len(anf)):\n            for s in anf[i]:\n                pc = popc(s)\n                if s == 0:\n                    c.x(T[i])\n                elif pc == 1:\n                    c.cx(X[s.bit_length() - 1], T[i])\n                else:\n                    c.cx(mq[s], T[i])\n        m1 = c.mark()\n        add(T, R, cin)\n        c.append_inverse(m0, m1)\n        Bc = Bn\n        j += r\n\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TS[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 8913744,
+  "T": 34416,
+  "Q": 259,
+  "widths": [
+   {
+    "n": 4,
+    "T": 620,
+    "Q": 35,
+    "gates": 1920
+   },
+   {
+    "n": 8,
+    "T": 2340,
+    "Q": 67,
+    "gates": 7310
+   },
+   {
+    "n": 16,
+    "T": 8928,
+    "Q": 131,
+    "gates": 29744
+   },
+   {
+    "n": 32,
+    "T": 34416,
+    "Q": 259,
+    "gates": 116066
+   }
+  ],
+  "scaling_exponent": 1.9466704975938733,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       620  Q=   35  T*Q=        21,700  gates=    1,920  [pass]\n  n=8  p=251        T=     2,340  Q=   67  T*Q=       156,780  gates=    7,310  [pass]\n  n=16 p=65521      T=     8,928  Q=  131  T*Q=     1,169,568  gates=   29,744  [pass]\n  n=32 p=4294967291 T=    34,416  Q=  259  T*Q=     8,913,744  gates=  116,066  [pass]\nScaling exponent log2(T32/T16) = 1.947  (T ~ n^1.95; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 8,913,744  (lower is better)\nEvaluation time: 0.7s",
+  "verified": true
+ },
+ {
+  "id": "g010_0_r2",
+  "gen": 10,
+  "parent": "g009_0_r2",
+  "mode": "redesign",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    nhu = min(iters, n - 1)\n    nfresh = iters - nhu\n\n    B = ((2 * p - 2) << iters) // (p + 1)\n    needE = L\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        needE = max(needE, j + 1 + Bt.bit_length())\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    extE = max(0, needE - L - n)\n    lenE = L + n + extE\n\n    def popc(x):\n        return bin(x).count('1')\n\n    def inv2r(r):\n        mod = 1 << r\n        t = 1\n        for _ in range(r + 2):\n            t = (t * (2 - p * t)) % mod\n        return t\n\n    RI = {}\n    for r in range(1, min(6, iters) + 1):\n        mod = 1 << r\n        ip = inv2r(r)\n        Ks = [(x + ((-x * ip) % mod) * p) >> r for x in range(mod)]\n        kb = max(Ks).bit_length()\n        anf = []\n        mons = set()\n        for i in range(kb):\n            co = [(K >> i) & 1 for K in Ks]\n            for k in range(r):\n                for x in range(mod):\n                    if (x >> k) & 1:\n                        co[x] ^= co[x ^ (1 << k)]\n            terms = [x for x in range(mod) if co[x]]\n            anf.append(terms)\n            for x in terms:\n                if popc(x) >= 2:\n                    mons.add(x)\n        stack = list(mons)\n        while stack:\n            s = stack.pop()\n            hb = s.bit_length() - 1\n            par = s ^ (1 << hb)\n            if popc(par) >= 2 and par not in mons:\n                mons.add(par)\n                stack.append(par)\n        RI[r] = (anf, mons, kb)\n\n    def choose(j, Bc, nfree):\n        best = None\n        for r in range(1, min(6, iters - j) + 1):\n            Bn = (Bc + ((1 << r) - 1) * p) >> r\n            w = Bn.bit_length()\n            if j + r + w > lenE:\n                continue\n            anf, mons, kb = RI[r]\n            if kb > w:\n                continue\n            M = len(mons)\n            avail = nfree + lenE - (j + r + w)\n            if w + M > avail:\n                continue\n            cost = (2.0 * w + 2.0 * M) / r\n            if best is None or cost < best[0]:\n                best = (cost, r, w, Bn, anf, mons, M)\n        return best\n\n    def plan(nfree):\n        j = 0\n        Bc = B\n        tot = 0\n        while j < iters:\n            b = choose(j, Bc, nfree)\n            if b is None:\n                return None\n            tot += 2 * b[2] + 2 * b[6]\n            Bc = b[3]\n            j += b[1]\n        return tot\n\n    Tloop = 0\n    for it in range(iters):\n        w = min(n, max(1, iters - it))\n        wc = min(n, it + 2)\n        if it > 0:\n            Tloop += 2\n            if w > 1:\n                Tloop += 2 * (w - 1) + 2\n        Tloop += w + wc + 3 * (w - 1) + 3 * wc\n    tcmp = 2 * wY if Bt > p else 0\n\n    baseTSF = n + 1 + (n - 1 - nhu)\n    anc_base = n + n + L + nfresh + 2 + extE\n    Qbase = 2 * n + anc_base\n    budget = len(c.anc)\n    best_extra = None\n    best_sc = None\n    for extra in range(0, 4 * n + 64):\n        if anc_base + extra > budget:\n            break\n        nT = baseTSF + extra\n        if Bt > p and nT < wY:\n            continue\n        tot = plan(nT + 1)\n        if tot is None:\n            continue\n        sc = (Tloop + tot + tcmp) * (Qbase + extra)\n        if best_sc is None or sc < best_sc:\n            best_sc = sc\n            best_extra = extra\n\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    Hf = c.alloc(nfresh) if nfresh > 0 else []\n    S = c.alloc(2)\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(best_extra) if best_extra > 0 else []\n\n    HQ = []\n    for it in range(iters):\n        k = iters - it\n        if k < n:\n            HQ.append(U[k])\n        else:\n            HQ.append(Hf[it])\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = HQ[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]\n        w = min(n, max(1, iters - it))\n        Uw = U[:w]\n        Vw = V[:w]\n        if it == 0:\n            c.cx(U[0], h1)\n            c.cx(U[0], sc)\n            c.x(sc)\n        else:\n            c.ccx(U[0], V[0], h1)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)\n            c.cx(V[0], U[0])\n            c.x(sc)\n            if w > 1:\n                for q in Vw[1:]:\n                    c.x(q)\n                m0 = c.mark()\n                prev = sp\n                for i in range(1, w):\n                    maj(prev, Uw[i], Vw[i])\n                    prev = Vw[i]\n                m1 = c.mark()\n                c.ccx(h1, Vw[w - 1], sc)\n                c.append_inverse(m0, m1)\n                for q in Vw[1:]:\n                    c.x(q)\n                c.ccx(h1, sp, sc)\n            c.cx(sp, sc)\n        wc = min(n, it + 2)\n        cswap(sc, Uw, Vw)\n        cswap(sc, CU[:wc], CV[:wc])\n        if it > 0:\n            c.cx(sp, sc)\n            c.cx(sc, sp)\n            c.cx(CV[0], sp)\n        csub(h1, Uw[1:], Vw[1:], cz)\n        c.cx(h1, Vw[0])\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:wc], CU[:wc], cz)\n        CV = CV[-1:] + CV[:-1]\n\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TSF = list(V) + [U[0]] + U[nhu + 1:] + TX\n    cin = S[0]\n    f = S[1]\n    nfree = len(TSF) + 1\n\n    j = 0\n    Bc = B\n    while j < iters:\n        cost, r, w, Bn, anf, mons, M = choose(j, Bc, nfree)\n        X = E[j:j + r]\n        R = E[j + r:j + r + w]\n        free = TSF + E[j + r + w:] + [f]\n        T = free[:w]\n        pool = free[w:]\n        order = sorted([(popc(s), s) for s in mons])\n        mq = {}\n        m0 = c.mark()\n        for idx in range(len(order)):\n            s = order[idx][1]\n            q = pool[idx]\n            mq[s] = q\n            hb = s.bit_length() - 1\n            par = s ^ (1 << hb)\n            if popc(par) >= 2:\n                a = mq[par]\n            else:\n                a = X[par.bit_length() - 1]\n            c.ccx(a, X[hb], q)\n        for i in range(len(anf)):\n            for s in anf[i]:\n                pc = popc(s)\n                if s == 0:\n                    c.x(T[i])\n                elif pc == 1:\n                    c.cx(X[s.bit_length() - 1], T[i])\n                else:\n                    c.cx(mq[s], T[i])\n        m1 = c.mark()\n        add(T, R, cin)\n        c.append_inverse(m0, m1)\n        Bc = Bn\n        j += r\n\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TSF[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 7938960,
+  "T": 34820,
+  "Q": 228,
+  "widths": [
+   {
+    "n": 4,
+    "T": 628,
+    "Q": 32,
+    "gates": 1936
+   },
+   {
+    "n": 8,
+    "T": 2364,
+    "Q": 60,
+    "gates": 7350
+   },
+   {
+    "n": 16,
+    "T": 8996,
+    "Q": 116,
+    "gates": 29440
+   },
+   {
+    "n": 32,
+    "T": 34820,
+    "Q": 228,
+    "gates": 112966
+   }
+  ],
+  "scaling_exponent": 1.9525606367606467,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       628  Q=   32  T*Q=        20,096  gates=    1,936  [pass]\n  n=8  p=251        T=     2,364  Q=   60  T*Q=       141,840  gates=    7,350  [pass]\n  n=16 p=65521      T=     8,996  Q=  116  T*Q=     1,043,536  gates=   29,440  [pass]\n  n=32 p=4294967291 T=    34,820  Q=  228  T*Q=     7,938,960  gates=  112,966  [pass]\nScaling exponent log2(T32/T16) = 1.953  (T ~ n^1.95; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 7,938,960  (lower is better)\nEvaluation time: 0.9s",
+  "verified": true
+ },
+ {
+  "id": "g013_0_r2",
+  "gen": 13,
+  "parent": "g010_0_r2",
+  "mode": "refine",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    nhu = min(iters, n - 1)\n    nfresh = iters - nhu\n\n    B = ((2 * p - 2) << iters) // (p + 1)\n    needE = L\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        needE = max(needE, j + 1 + Bt.bit_length())\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    extE = max(0, needE - L - n)\n    lenE = L + n + extE\n\n    def popc(x):\n        return bin(x).count('1')\n\n    def inv2r(r):\n        mod = 1 << r\n        t = 1\n        for _ in range(r + 2):\n            t = (t * (2 - p * t)) % mod\n        return t\n\n    RI = {}\n    for r in range(1, min(6, iters) + 1):\n        mod = 1 << r\n        ip = inv2r(r)\n        Ks = [(x + ((-x * ip) % mod) * p) >> r for x in range(mod)]\n        kb = max(Ks).bit_length()\n        anf = []\n        mons = set()\n        for i in range(kb):\n            co = [(K >> i) & 1 for K in Ks]\n            for k in range(r):\n                for x in range(mod):\n                    if (x >> k) & 1:\n                        co[x] ^= co[x ^ (1 << k)]\n            terms = [x for x in range(mod) if co[x]]\n            anf.append(terms)\n            for x in terms:\n                if popc(x) >= 2:\n                    mons.add(x)\n        stack = list(mons)\n        while stack:\n            s = stack.pop()\n            hb = s.bit_length() - 1\n            par = s ^ (1 << hb)\n            if popc(par) >= 2 and par not in mons:\n                mons.add(par)\n                stack.append(par)\n        RI[r] = (anf, mons, kb)\n\n    def choose(j, Bc, nfree):\n        best = None\n        for r in range(1, min(6, iters - j) + 1):\n            Bn = (Bc + ((1 << r) - 1) * p) >> r\n            w = Bn.bit_length()\n            if j + r + w > lenE:\n                continue\n            anf, mons, kb = RI[r]\n            if kb > w:\n                continue\n            M = len(mons)\n            avail = nfree + lenE - (j + r + w)\n            if w + M > avail:\n                continue\n            cost = (2.0 * w + 2.0 * M) / r\n            if best is None or cost < best[0]:\n                best = (cost, r, w, Bn, anf, mons, M)\n        return best\n\n    def plan(nfree):\n        j = 0\n        Bc = B\n        tot = 0\n        while j < iters:\n            b = choose(j, Bc, nfree)\n            if b is None:\n                return None\n            tot += 2 * b[2] + 2 * b[6]\n            Bc = b[3]\n            j += b[1]\n        return tot\n\n    Tloop = 0\n    for it in range(iters):\n        w = min(n, max(1, iters - it))\n        wc = min(n, it + 2)\n        if it > 0:\n            Tloop += 2\n            if w > 1:\n                Tloop += 2 * (w - 1) + 2\n        Tloop += w + wc + 3 * (w - 1) + 3 * wc\n    tcmp = 2 * wY if Bt > p else 0\n\n    baseTSF = n + 1 + (n - 1 - nhu)\n    nHf = nfresh - 1 if nfresh >= 2 else nfresh\n    anc_base = n + n + L + nHf + 2 + extE\n    Qbase = 2 * n + anc_base\n    budget = len(c.anc)\n    best_extra = None\n    best_sc = None\n    for extra in range(0, 4 * n + 64):\n        if anc_base + extra > budget:\n            break\n        nT = baseTSF + extra\n        if Bt > p and nT < wY:\n            continue\n        tot = plan(nT + 1)\n        if tot is None:\n            continue\n        sc = (Tloop + tot + tcmp) * (Qbase + extra)\n        if best_sc is None or sc < best_sc:\n            best_sc = sc\n            best_extra = extra\n\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    Hf = c.alloc(nHf) if nHf > 0 else []\n    S = c.alloc(2)\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(best_extra) if best_extra > 0 else []\n\n    HQ = []\n    for it in range(iters):\n        k = iters - it\n        if k < n:\n            HQ.append(U[k])\n        elif nfresh >= 2 and it >= 1:\n            HQ.append(Hf[it - 1])\n        else:\n            HQ.append(Hf[it])\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = HQ[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]\n        w = min(n, max(1, iters - it))\n        Uw = U[:w]\n        Vw = V[:w]\n        if it == 0:\n            c.cx(U[0], h1)\n            c.cx(U[0], sc)\n            c.x(sc)\n        else:\n            c.ccx(U[0], V[0], h1)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)\n            c.cx(V[0], U[0])\n            c.x(sc)\n            if w > 1:\n                for q in Vw[1:]:\n                    c.x(q)\n                m0 = c.mark()\n                prev = sp\n                for i in range(1, w):\n                    maj(prev, Uw[i], Vw[i])\n                    prev = Vw[i]\n                m1 = c.mark()\n                c.ccx(h1, Vw[w - 1], sc)\n                c.append_inverse(m0, m1)\n                for q in Vw[1:]:\n                    c.x(q)\n                c.ccx(h1, sp, sc)\n            c.cx(sp, sc)\n        wc = min(n, it + 2)\n        cswap(sc, Uw, Vw)\n        cswap(sc, CU[:wc], CV[:wc])\n        if it > 0:\n            c.cx(sp, sc)\n            c.cx(sc, sp)\n            c.cx(CV[0], sp)\n        csub(h1, Uw[1:], Vw[1:], cz)\n        c.cx(h1, Vw[0])\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:wc], CU[:wc], cz)\n        CV = CV[-1:] + CV[:-1]\n        if it == 0:\n            c.cx(CV[1], h1)\n\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TSF = list(V) + [U[0]] + U[nhu + 1:] + TX\n    cin = S[0]\n    f = S[1]\n    nfree = len(TSF) + 1\n\n    j = 0\n    Bc = B\n    while j < iters:\n        cost, r, w, Bn, anf, mons, M = choose(j, Bc, nfree)\n        X = E[j:j + r]\n        R = E[j + r:j + r + w]\n        free = TSF + E[j + r + w:] + [f]\n        T = free[:w]\n        pool = free[w:]\n        order = sorted([(popc(s), s) for s in mons])\n        mq = {}\n        m0 = c.mark()\n        for idx in range(len(order)):\n            s = order[idx][1]\n            q = pool[idx]\n            mq[s] = q\n            hb = s.bit_length() - 1\n            par = s ^ (1 << hb)\n            if popc(par) >= 2:\n                a = mq[par]\n            else:\n                a = X[par.bit_length() - 1]\n            c.ccx(a, X[hb], q)\n        for i in range(len(anf)):\n            for s in anf[i]:\n                pc = popc(s)\n                if s == 0:\n                    c.x(T[i])\n                elif pc == 1:\n                    c.cx(X[s.bit_length() - 1], T[i])\n                else:\n                    c.cx(mq[s], T[i])\n        m1 = c.mark()\n        add(T, R, cin)\n        c.append_inverse(m0, m1)\n        Bc = Bn\n        j += r\n\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TSF[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 7904140,
+  "T": 34820,
+  "Q": 227,
+  "widths": [
+   {
+    "n": 4,
+    "T": 628,
+    "Q": 31,
+    "gates": 1938
+   },
+   {
+    "n": 8,
+    "T": 2364,
+    "Q": 59,
+    "gates": 7352
+   },
+   {
+    "n": 16,
+    "T": 8996,
+    "Q": 115,
+    "gates": 29442
+   },
+   {
+    "n": 32,
+    "T": 34820,
+    "Q": 227,
+    "gates": 112968
+   }
+  ],
+  "scaling_exponent": 1.9525606367606467,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       628  Q=   31  T*Q=        19,468  gates=    1,938  [pass]\n  n=8  p=251        T=     2,364  Q=   59  T*Q=       139,476  gates=    7,352  [pass]\n  n=16 p=65521      T=     8,996  Q=  115  T*Q=     1,034,540  gates=   29,442  [pass]\n  n=32 p=4294967291 T=    34,820  Q=  227  T*Q=     7,904,140  gates=  112,968  [pass]\nScaling exponent log2(T32/T16) = 1.953  (T ~ n^1.95; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 7,904,140  (lower is better)\nEvaluation time: 0.7s",
+  "verified": true
+ },
+ {
+  "id": "g017_0_r2",
+  "gen": 17,
+  "parent": "g013_0_r2",
+  "mode": "refine",
+  "source": "def build_circuit(c, n, p):\n    iters = (p * (p - 1)).bit_length()\n    L = max(iters, n) + 1\n    U = list(c.inp)\n    nhu = min(iters, n - 1)\n    nfresh = iters - nhu\n\n    B = ((2 * p - 2) << iters) // (p + 1)\n    needE = L\n    Bt = B\n    for j in range(iters):\n        Bt = (Bt + p) // 2\n        needE = max(needE, j + 1 + Bt.bit_length())\n    wY = Bt.bit_length()\n    needE = max(needE, iters + wY)\n    extE = max(0, needE - L - n)\n    lenE = L + n + extE\n\n    def popc(x):\n        return bin(x).count('1')\n\n    def inv2r(r):\n        mod = 1 << r\n        t = 1\n        for _ in range(r + 2):\n            t = (t * (2 - p * t)) % mod\n        return t\n\n    RI = {}\n    for r in range(1, min(6, iters) + 1):\n        mod = 1 << r\n        ip = inv2r(r)\n        Ks = [(x + ((-x * ip) % mod) * p) >> r for x in range(mod)]\n        kb = max(Ks).bit_length()\n        anf = []\n        mons = set()\n        for i in range(kb):\n            co = [(K >> i) & 1 for K in Ks]\n            for k in range(r):\n                for x in range(mod):\n                    if (x >> k) & 1:\n                        co[x] ^= co[x ^ (1 << k)]\n            terms = [x for x in range(mod) if co[x]]\n            anf.append(terms)\n            for x in terms:\n                if popc(x) >= 2:\n                    mons.add(x)\n        stack = list(mons)\n        while stack:\n            s = stack.pop()\n            hb = s.bit_length() - 1\n            par = s ^ (1 << hb)\n            if popc(par) >= 2 and par not in mons:\n                mons.add(par)\n                stack.append(par)\n        RI[r] = (anf, mons, kb)\n\n    def choose(j, Bc, nfree):\n        best = None\n        for r in range(1, min(6, iters - j) + 1):\n            Bn = (Bc + ((1 << r) - 1) * p) >> r\n            w = Bn.bit_length()\n            if j + r + w > lenE:\n                continue\n            anf, mons, kb = RI[r]\n            if kb > w:\n                continue\n            M = len(mons)\n            avail = nfree + lenE - (j + r + w)\n            if w + M > avail:\n                continue\n            cost = (2.0 * w + 2.0 * M) / r\n            if best is None or cost < best[0]:\n                best = (cost, r, w, Bn, anf, mons, M)\n        return best\n\n    def plan(nfree):\n        j = 0\n        Bc = B\n        tot = 0\n        while j < iters:\n            b = choose(j, Bc, nfree)\n            if b is None:\n                return None\n            tot += 2 * b[2] + 2 * b[6]\n            Bc = b[3]\n            j += b[1]\n        return tot\n\n    Tloop = 0\n    for it in range(iters):\n        w = min(n, max(1, iters - it))\n        wc = min(n, it + 1)\n        if it > 0:\n            Tloop += 2\n            if w > 1:\n                Tloop += 2 * (w - 1) + 2\n        Tloop += w + wc + 3 * (w - 1) + 3 * wc\n    tcmp = 2 * wY if Bt > p else 0\n\n    baseTSF = n + 1 + (n - 1 - nhu)\n    nHf = nfresh - 1 if nfresh >= 2 else nfresh\n    anc_base = n + n + L + nHf + 2 + extE\n    Qbase = 2 * n + anc_base\n    budget = len(c.anc)\n    best_extra = None\n    best_sc = None\n    for extra in range(0, 4 * n + 64):\n        if anc_base + extra > budget:\n            break\n        nT = baseTSF + extra\n        if Bt > p and nT < wY:\n            continue\n        tot = plan(nT + 1)\n        if tot is None:\n            continue\n        sc = (Tloop + tot + tcmp) * (Qbase + extra)\n        if best_sc is None or sc < best_sc:\n            best_sc = sc\n            best_extra = extra\n\n    V = c.alloc(n)\n    CU = c.alloc(n)\n    CV = c.alloc(L)\n    Hf = c.alloc(nHf) if nHf > 0 else []\n    S = c.alloc(2)\n    EX = c.alloc(extE) if extE > 0 else []\n    TX = c.alloc(best_extra) if best_extra > 0 else []\n\n    HQ = []\n    for it in range(iters):\n        k = iters - it\n        if k < n:\n            HQ.append(U[k])\n        elif nfresh >= 2 and it >= 1:\n            HQ.append(Hf[it - 1])\n        else:\n            HQ.append(Hf[it])\n\n    def maj(x, y, w):\n        c.cx(w, y)\n        c.cx(w, x)\n        c.ccx(x, y, w)\n\n    def uma(x, y, w):\n        c.ccx(x, y, w)\n        c.cx(w, x)\n        c.cx(x, y)\n\n    def add(a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            uma(cin if i == 0 else a[i - 1], b[i], a[i])\n\n    def cadd(ctl, a, b, cin):\n        m = len(a)\n        prev = cin\n        for i in range(m):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        for i in range(m - 1, -1, -1):\n            x = cin if i == 0 else a[i - 1]\n            c.ccx(x, b[i], a[i])\n            c.ccx(ctl, x, b[i])\n            c.cx(a[i], x)\n            c.cx(a[i], b[i])\n\n    def csub(ctl, a, b, cin):\n        m0 = c.mark()\n        cadd(ctl, a, b, cin)\n        c.invert_since(m0)\n\n    def compare(a, b, out, cin):\n        for q in a:\n            c.x(q)\n        m0 = c.mark()\n        prev = cin\n        for i in range(len(a)):\n            maj(prev, b[i], a[i])\n            prev = a[i]\n        m1 = c.mark()\n        c.cx(a[-1], out)\n        c.append_inverse(m0, m1)\n        for q in a:\n            c.x(q)\n\n    def load(reg, k, ctrl=None):\n        for i in range(len(reg)):\n            if (k >> i) & 1:\n                if ctrl is None:\n                    c.x(reg[i])\n                else:\n                    c.cx(ctrl, reg[i])\n\n    def cswap(s, A, B2):\n        for i in range(len(A)):\n            c.cx(B2[i], A[i])\n            c.ccx(s, A[i], B2[i])\n            c.cx(B2[i], A[i])\n\n    start = c.mark()\n    load(V, p)\n    c.x(CV[0])\n    for it in range(iters):\n        h1 = HQ[it]\n        sp = S[it % 2]\n        sc = S[(it + 1) % 2]\n        cz = CV[-1]\n        w = min(n, max(1, iters - it))\n        Uw = U[:w]\n        Vw = V[:w]\n        if it == 0:\n            c.cx(U[0], h1)\n            c.cx(U[0], sc)\n            c.x(sc)\n        else:\n            c.ccx(U[0], V[0], h1)\n            c.cx(U[0], sc)\n            c.cx(V[0], U[0])\n            c.ccx(sp, U[0], sc)\n            c.cx(V[0], U[0])\n            c.x(sc)\n            if w > 1:\n                for q in Vw[1:]:\n                    c.x(q)\n                m0 = c.mark()\n                prev = sp\n                for i in range(1, w):\n                    maj(prev, Uw[i], Vw[i])\n                    prev = Vw[i]\n                m1 = c.mark()\n                c.ccx(h1, Vw[w - 1], sc)\n                c.append_inverse(m0, m1)\n                for q in Vw[1:]:\n                    c.x(q)\n                c.ccx(h1, sp, sc)\n            c.cx(sp, sc)\n        wc = min(n, it + 1)\n        cswap(sc, Uw, Vw)\n        cswap(sc, CU[:wc], CV[:wc])\n        if it > 0:\n            c.cx(sp, sc)\n            c.cx(sc, sp)\n            c.cx(CV[0], sp)\n        csub(h1, Uw[1:], Vw[1:], cz)\n        c.cx(h1, Vw[0])\n        V = V[1:] + V[:1]\n        cadd(h1, CV[:wc], CU[:wc], cz)\n        CV = CV[-1:] + CV[:-1]\n        if it == 0:\n            c.cx(CV[1], h1)\n\n    c.x(U[0])\n    load(CU, p)\n    E = CV + CU + EX\n    TSF = list(V) + [U[0]] + U[nhu + 1:] + TX\n    cin = S[0]\n    f = S[1]\n    nfree = len(TSF) + 1\n\n    j = 0\n    Bc = B\n    while j < iters:\n        cost, r, w, Bn, anf, mons, M = choose(j, Bc, nfree)\n        X = E[j:j + r]\n        R = E[j + r:j + r + w]\n        free = TSF + E[j + r + w:] + [f]\n        T = free[:w]\n        pool = free[w:]\n        order = sorted([(popc(s), s) for s in mons])\n        mq = {}\n        m0 = c.mark()\n        for idx in range(len(order)):\n            s = order[idx][1]\n            q = pool[idx]\n            mq[s] = q\n            hb = s.bit_length() - 1\n            par = s ^ (1 << hb)\n            if popc(par) >= 2:\n                a = mq[par]\n            else:\n                a = X[par.bit_length() - 1]\n            c.ccx(a, X[hb], q)\n        for i in range(len(anf)):\n            for s in anf[i]:\n                pc = popc(s)\n                if s == 0:\n                    c.x(T[i])\n                elif pc == 1:\n                    c.cx(X[s.bit_length() - 1], T[i])\n                else:\n                    c.cx(mq[s], T[i])\n        m1 = c.mark()\n        add(T, R, cin)\n        c.append_inverse(m0, m1)\n        Bc = Bn\n        j += r\n\n    Y = E[iters:iters + wY]\n    if Bt > p:\n        T = TSF[:wY]\n        load(T, p)\n        compare(T, Y, f, cin)\n        load(T, p)\n        d = (p + 1) ^ 1\n        for i in range(wY):\n            if (d >> i) & 1:\n                c.cx(f, Y[i])\n    end = c.mark()\n    for i in range(min(n, wY)):\n        c.cx(Y[i], c.out[i])\n    c.append_inverse(start, end)\n",
+  "score": 7847844,
+  "T": 34572,
+  "Q": 227,
+  "widths": [
+   {
+    "n": 4,
+    "T": 604,
+    "Q": 31,
+    "gates": 1878
+   },
+   {
+    "n": 8,
+    "T": 2308,
+    "Q": 59,
+    "gates": 7212
+   },
+   {
+    "n": 16,
+    "T": 8876,
+    "Q": 115,
+    "gates": 29142
+   },
+   {
+    "n": 32,
+    "T": 34572,
+    "Q": 227,
+    "gates": 112348
+   }
+  ],
+  "scaling_exponent": 1.9616224936840152,
+  "feedback": "VALID at every width.\nPer-width counts (T = Toffolis, Q = qubits used incl. the 2n register qubits):\n  n=4  p=13         T=       604  Q=   31  T*Q=        18,724  gates=    1,878  [pass]\n  n=8  p=251        T=     2,308  Q=   59  T*Q=       136,172  gates=    7,212  [pass]\n  n=16 p=65521      T=     8,876  Q=  115  T*Q=     1,020,740  gates=   29,142  [pass]\n  n=32 p=4294967291 T=    34,572  Q=  227  T*Q=     7,847,844  gates=  112,348  [pass]\nScaling exponent log2(T32/T16) = 1.962  (T ~ n^1.96; 1-2 = polynomial algorithm, ~17 = exponential (lookup-style))\nPRIMARY SCORE (T*Q at n=32): 7,847,844  (lower is better)\nEvaluation time: 0.8s",
+  "verified": true
+ }
+]

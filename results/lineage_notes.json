@@ -1,0 +1,19 @@
+{
+ "_about": "Hand-written one-sentence descriptions of each lineage step, from the model's reply (runs/smoke2/replies/<id>.md, copied to results/lineage/) and the code diff. Prose only: every number in RESULTS.md comes from the logs.",
+ "seed_binary_euclid": "Textbook baseline: reversible binary extended Euclid with modular halving of the coefficients, two stored history bits per step, and a full Bennett reversal.",
+ "g001_0": "Keeps u odd so the operated register is always v: the swap is never undone, the 'v odd' history bit becomes a CNOT copy, one carry chain replaces two comparisons, and the input register itself serves as the initial v (the reverse pass restores it).",
+ "g002_0_r1": "Redesign to Kaliski-style integer coefficients, so the loop does no modular arithmetic: one stored history bit per step (the swap bit is recovered from coefficient parity) and a single Montgomery-style correction of the 2^k factor at the end.",
+ "g003_0_r2": "Restricts the coefficient swaps and additions in early iterations to the low bits that can be non-zero, since the coefficients at most double each step.",
+ "g006_0_r2": "Makes u and v shrink with the GCD: because u·v at least halves every step, an input-independent bound lets the comparator, swap and subtraction act only on the low bits that can still be non-zero.",
+ "g007_0_r2": "Keeps the coefficients in the same persistent swapped orientation as u and v, so one coefficient swap per step (controlled by the change in the swap bit) replaces a swap and a swap-back.",
+ "g008_0_r2": "Replaces the bit-serial Montgomery correction with a radix-2^r version that clears several bits per addition using a precomputed table of AND-terms of the low bits.",
+ "g009_0_r2": "Uses parity facts (both values are odd whenever a subtraction fires) to drop bit 0 from the comparator and the controlled subtraction.",
+ "g010_0_r2": "Stores the history bits of late iterations in input-register qubits that are provably zero by then, and takes the correction stage's scratch space from provably-zero bits, cutting the qubit count instead of the Toffoli count.",
+ "g013_0_r2": "Clears iteration 0's history bit immediately (it equals bit 1 of the doubled coefficient), so iterations 0 and 1 share one qubit.",
+ "g017_0_r2": "Tightens the coefficient width bound by one bit, using the invariant V·CV + U·CU = p for odd p to show the coefficient sum always fits.",
+ "_surprises": [
+  "The model predicted its own T and Q at n=32 by hand in every lineage reply, without running anything (the replies say so); the predictions were close throughout and exact for the last two steps.",
+  "The winner computes in place in the input register (the contract allows it, since the reverse pass restores it) and parks late history bits in input qubits that are provably zero by then; the prompt only suggested generic register reuse.",
+  "No candidate in this run failed the hidden verify tier; every failure was caught earlier, by the normal tier, the syntax check or the duplicate check."
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "program": "best.py",
+ "program_sha256": "ac9e98c4a0d1d8b6c5eba46201a4f4e06607c13fc329af625e876142f61848e1",
+ "hidden_values": "rotated after the originals were published; stored only in the untracked hidden_values.json",
+ "normal_tier": {
+  "valid": true,
+  "score": 7847844,
+  "T": 34572,
+  "Q": 227,
+  "hidden_inputs_at_n32": 256
+ },
+ "verify_tier": {
+  "passed": true,
+  "targets": 4,
+  "hidden_extra_widths": 2,
+  "inputs_checked": 26474,
+  "inputs_at_score_width": 20122,
+  "failure_kind": null
+ },
+ "seconds": 4.3
+}

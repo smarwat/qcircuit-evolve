@@ -1,0 +1,27 @@
+{
+ "front": [
+  {
+   "id": "g009_0_r2",
+   "gen": 9,
+   "parent": "g008_0_r2",
+   "mode": "refine",
+   "T": 34416,
+   "Q": 259,
+   "score": 8913744,
+   "verified": true
+  },
+  {
+   "id": "g017_0_r2",
+   "gen": 17,
+   "parent": "g013_0_r2",
+   "mode": "refine",
+   "T": 34572,
+   "Q": 227,
+   "score": 7847844,
+   "verified": true
+  }
+ ],
+ "best": "g017_0_r2",
+ "best_score": 7847844,
+ "valid_programs": 13
+}

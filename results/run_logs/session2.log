@@ -1,0 +1,19 @@
+[backend] claude-code: {'backend': 'claude-code', 'binary': '/opt/homebrew/bin/claude', 'model': 'claude-opus-5-5', 'effort': 'medium', 'version': '2.1.305 (Claude Code)'}
+[gen 3] 1 proposed, 1 valid, front 1, best g003_0_r2 T*Q 13,326,586 | notional $0.264 (not billed), 3 calls total, 101s
+[gen 4] 1 proposed, 1 valid, front 1, best g003_0_r2 T*Q 13,326,586 | notional $0.116 (not billed), 4 calls total, 24s
+[gen 5] 1 proposed, 0 valid, front 1, best g003_0_r2 T*Q 13,326,586 | notional $0.132 (not billed), 5 calls total, 37s
+[gen 6] 1 proposed, 1 valid, front 1, best g006_0_r2 T*Q 11,785,018 | notional $0.491 (not billed), 6 calls total, 230s
+[gen 7] 1 proposed, 1 valid, front 1, best g007_0_r2 T*Q 10,965,024 | notional $0.258 (not billed), 7 calls total, 104s
+[gen 8] 1 proposed, 1 valid, front 1, best g008_0_r2 T*Q 9,079,504 | notional $0.506 (not billed), 8 calls total, 220s
+[gen 9] 1 proposed, 1 valid, front 1, best g009_0_r2 T*Q 8,913,744 | notional $0.317 (not billed), 9 calls total, 134s
+[gen 10] 1 proposed, 1 valid, front 2, best g010_0_r2 T*Q 7,938,960 | notional $1.006 (not billed), 10 calls total, 657s
+[gen 11] 1 proposed, 0 valid, front 2, best g010_0_r2 T*Q 7,938,960 | notional $0.180 (not billed), 11 calls total, 33s
+[gen 12] 1 proposed, 0 valid, front 2, best g010_0_r2 T*Q 7,938,960 | notional $0.411 (not billed), 12 calls total, 172s
+[gen 13] 1 proposed, 1 valid, front 2, best g013_0_r2 T*Q 7,904,140 | notional $0.165 (not billed), 13 calls total, 88s
+[gen 14] 1 proposed, 0 valid, front 2, best g013_0_r2 T*Q 7,904,140 | notional $0.357 (not billed), 14 calls total, 140s
+[gen 15] 1 proposed, 0 valid, front 2, best g013_0_r2 T*Q 7,904,140 | notional $0.186 (not billed), 15 calls total, 33s
+[gen 16] 1 proposed, 0 valid, front 2, best g013_0_r2 T*Q 7,904,140 | notional $0.188 (not billed), 16 calls total, 34s
+[gen 17] 1 proposed, 1 valid, front 2, best g017_0_r2 T*Q 7,847,844 | notional $0.347 (not billed), 17 calls total, 187s
+[stop] --max-calls 17 reached.
+Done. Best: g017_0_r2 T*Q 7,847,844. notional $7.846 (subscription, not billed) over 17 calls. Run dir: runs/smoke2
+orchestrator exit=0

@@ -1,0 +1,9 @@
+[best] n=4: Q=31 T=604 Tdepth=432 basis 12/12 ok, 0.3s
+[best] n=8: Q=59 T=2308 Tdepth=1562 basis 250/250 ok, 24.9s
+[best] n=16: Q=115 T=8876 Tdepth=5860 basis 285/285 ok, 138.8s
+[best] n=32: Q=227 T=34572 Tdepth=22450 basis 318/318 ok, 775.9s
+[best] n=4 quantum (hadamard): mass 0.000000000000 (expected 0.750000000000), Schmidt rank 1, 0.3s
+[best] n=4 quantum (valid): mass 0.000000000000 (expected 1.000000000000), Schmidt rank 1, 0.3s
+[selftest] Aer MPS vs statevector on a random 14-qubit reversible circuit: PASS {'hadamard': {'probabilities_match': True, 'expectation_matches': True}, 'valid_compiled': {'probabilities_match': True, 'expectation_matches': True}}
+[best] n=4 quantum (hadamard): io mass on correct pairs 0.750000000006 (expected 0.750000000000), <sum Z_anc> 23.000000000 of 23, bad shots 0/0, 0.4s
+[best] n=4 quantum (valid): io mass on correct pairs 1.000000000000 (expected 1.000000000000), <sum Z_anc> 23.000000000 of 23, bad shots 0/0, 0.3s
