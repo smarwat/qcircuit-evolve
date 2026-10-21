@@ -1,6 +1,6 @@
-# qcircuit-evolve
+# Shor's Edge
 
-**5.36× lower T·Q than a textbook binary-Euclid baseline for reversible modular inversion at
+**Shor's Edge: 5.36× lower T·Q than a textbook binary-Euclid baseline for reversible modular inversion at
 n = 32: 107,520 → 34,572 Toffolis and 391 → 227 qubits, found in 17 Claude Opus 5.5 calls.**
 
 An evolutionary loop in which Claude proposes width-generic reversible circuits (X / CNOT /
@@ -13,7 +13,7 @@ By [Yusuf Marwat](https://github.com/smarwat). Inspired by Anthropic's
 (October 2026). This project is an independent, small-scale exploration, not affiliated with or a
 replication of that work.
 
-[![ci](https://github.com/smarwat/qcircuit-evolve/actions/workflows/ci.yml/badge.svg)](https://github.com/smarwat/qcircuit-evolve/actions/workflows/ci.yml)
+[![ci](https://github.com/smarwat/shors-edge/actions/workflows/ci.yml/badge.svg)](https://github.com/smarwat/shors-edge/actions/workflows/ci.yml)
 
 ## Why it matters
 

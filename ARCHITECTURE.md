@@ -1,4 +1,4 @@
-# Architecture
+# Shor's Edge: architecture
 
 ## Data flow
 

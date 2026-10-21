@@ -1,4 +1,4 @@
-# qcircuit-evolve: notes for Claude
+# Shor's Edge: notes for Claude
 
 Evolutionary search where Claude proposes reversible circuits (X/CNOT/Toffoli) for
 width-generic modular inversion and a strict evaluator scores them. README.md has the details.
@@ -72,6 +72,9 @@ add code paths that fall back to it, unless the user asks. Tests must never invo
   `failed hidden tests at n=…`; verify failures say only `failed verification`. Hidden seeds,
   verify widths and verify primes must never appear in prompts or model-visible feedback
   (tests check this).
+- Commits and pull requests in this repo carry no AI attribution: no `Co-Authored-By: Claude`
+  trailer, no `Claude-Session` line, no "Generated with Claude Code" text. (Set locally via
+  `"attribution": {"commit": "", "pr": "", "sessionUrl": false}` in `.claude/settings.local.json`.)
 - Keep `--mock` working without network access or the `anthropic` package.
 - The `claude -p` subprocess must keep running in an empty temp dir with the allowlisted
   environment (no ANTHROPIC_* / CLAUDE_CODE_* variables), `--tools ""` AND the isolation flags
